@@ -277,11 +277,16 @@ git push origin main --tags
 ### What the Script Does
 
 The `bump-version.sh` script automatically:
-1. Updates `BERANODE_VERSION` in the [beranode](beranode) file
-2. Moves unreleased changes in [CHANGELOG.md](CHANGELOG.md) to a new version section
-3. Updates version comparison links in the changelog
-4. Optionally creates a git commit and tag (with `--tag` flag)
-5. Includes a custom description in commit and tag messages (with `-m, --message` flag)
+1. Updates `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh)
+2. Rebuilds the [beranode](beranode) file from sources
+3. Updates [CHANGELOG.md](CHANGELOG.md) with:
+   - A new version section (newest versions at top, chronological order)
+   - Summary section (if `-m, --message` is provided)
+   - Changed Files section listing all modified files
+   - Standard changelog categories (Added, Changed, Deprecated, Removed, Fixed, Security)
+4. Updates version comparison links in the changelog
+5. Optionally creates a git commit and tag (with `--tag` flag)
+6. Includes a custom description in commit and tag messages (with `-m, --message` flag)
 
 ## Contributing
 

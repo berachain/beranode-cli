@@ -13,7 +13,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+CONSTANTS_FILE="$ROOT_DIR/src/lib/constants.sh"
 BERANODE_FILE="$ROOT_DIR/beranode"
+BUILD_SCRIPT="$ROOT_DIR/build.sh"
 CHANGELOG_FILE="$ROOT_DIR/CHANGELOG.md"
 
 # Colors
@@ -54,7 +56,7 @@ EOF
 }
 
 get_current_version() {
-    grep -E '^BERANODE_VERSION=' "$BERANODE_FILE" | sed 's/BERANODE_VERSION="//' | sed 's/"//'
+    grep -E '^BERANODE_VERSION=' "$CONSTANTS_FILE" | sed 's/BERANODE_VERSION="//' | sed 's/".*//'
 }
 
 validate_semver() {
@@ -91,35 +93,43 @@ calculate_new_version() {
 
 update_beranode_version() {
     local new_version="$1"
-    sed -i.bak "s/^BERANODE_VERSION=\".*\"/BERANODE_VERSION=\"$new_version\"/" "$BERANODE_FILE"
-    rm -f "$BERANODE_FILE.bak"
+
+    # Update the source file (replace entire line including any existing comments)
+    sed -i.bak "s/^BERANODE_VERSION=.*/BERANODE_VERSION=\"$new_version\"  # Managed by scripts\/bump-version.sh - do not edit manually/" "$CONSTANTS_FILE"
+    rm -f "$CONSTANTS_FILE.bak"
+
+    # Rebuild the beranode file
+    if [[ -x "$BUILD_SCRIPT" ]]; then
+        echo -e "${BLUE}Rebuilding beranode...${RESET}"
+        "$BUILD_SCRIPT" > /dev/null 2>&1
+    else
+        echo -e "${YELLOW}Warning: build.sh not found or not executable${RESET}"
+    fi
 }
 
 update_changelog() {
     local new_version="$1"
+    local old_version="$2"
+    local description="$3"
     local today
     today=$(date +%Y-%m-%d)
 
     # Check if there are unreleased changes
     local unreleased_content
-    unreleased_content=$(sed -n '/^## \[Unreleased\]/,/^## \[/p' "$CHANGELOG_FILE" | head -n -1)
+    unreleased_content=$(sed -n '/^## \[Unreleased\]/,/^## \[/p' "$CHANGELOG_FILE" | sed '$d')
 
     # Check if unreleased section has any content beyond headers
     local has_changes
     has_changes=$(echo "$unreleased_content" | grep -v '^## \[Unreleased\]' | grep -v '^$' | grep -v '^### ' | head -1)
 
-    if [[ -z "$has_changes" ]]; then
+    if [[ -z "$has_changes" && -z "$description" ]]; then
         echo -e "${YELLOW}Warning: No changes documented in [Unreleased] section${RESET}"
         echo "Consider adding changelog entries before releasing."
         echo ""
     fi
 
-    # Create the new version section
-    local current_version
-    current_version=$(get_current_version)
-
     # Update the file using awk for more reliable multi-line replacement
-    awk -v new_ver="$new_version" -v today="$today" -v curr_ver="$current_version" '
+    awk -v new_ver="$new_version" -v today="$today" -v old_ver="$old_version" -v desc="$description" '
     /^## \[Unreleased\]/ {
         print "## [Unreleased]"
         print ""
@@ -138,15 +148,57 @@ update_changelog() {
         in_unreleased = 1
         next
     }
-    /^## \[/ && in_unreleased {
+    # Skip all content of the old [Unreleased] section until we hit the next version header
+    in_unreleased && /^## \[/ {
         print "## [" new_ver "] - " today
+        print ""
+
+        # Add Summary section if description is provided
+        if (desc != "") {
+            print "### Summary"
+            print ""
+            print desc
+            print ""
+        }
+
+        # Add Changed Files section
+        print "### Changed Files"
+        print ""
+        print "- `src/lib/constants.sh` - Updated BERANODE_VERSION to " new_ver
+        print "- `beranode` - Rebuilt from sources"
+        print "- `CHANGELOG.md` - Updated with release " new_ver
+        print ""
+
+        # Add standard changelog sections
+        print "### Added"
+        print ""
+        print "### Changed"
+        print ""
+        print "### Deprecated"
+        print ""
+        print "### Removed"
+        print ""
+        print "### Fixed"
+        print ""
+        print "### Security"
+        print ""
+
         in_unreleased = 0
-    }
-    /^\[Unreleased\]:/ {
-        print "[Unreleased]: https://github.com/berachain/beranode-cli/compare/v" new_ver "...HEAD"
-        print "[" new_ver "]: https://github.com/berachain/beranode-cli/compare/v" curr_ver "...v" new_ver
+        # Print the old version header that we just encountered
+        print
         next
     }
+    # Skip lines while we are still in the unreleased section
+    in_unreleased {
+        next
+    }
+    # Update the comparison links at the bottom
+    /^\[Unreleased\]:/ {
+        print "[Unreleased]: https://github.com/berachain/beranode-cli/compare/v" new_ver "...HEAD"
+        print "[" new_ver "]: https://github.com/berachain/beranode-cli/compare/v" old_ver "...v" new_ver
+        next
+    }
+    # Print all other lines
     { print }
     ' "$CHANGELOG_FILE" > "$CHANGELOG_FILE.tmp" && mv "$CHANGELOG_FILE.tmp" "$CHANGELOG_FILE"
 }
@@ -158,7 +210,8 @@ show_diff() {
     echo -e "${BOLD}Version bump:${RESET} $current -> ${GREEN}$new${RESET}"
     echo ""
     echo -e "${BOLD}Files to be modified:${RESET}"
-    echo "  - beranode (BERANODE_VERSION)"
+    echo "  - src/lib/constants.sh (BERANODE_VERSION)"
+    echo "  - beranode (rebuilt from sources)"
     echo "  - CHANGELOG.md ([Unreleased] -> [$new])"
     echo ""
 }
@@ -216,7 +269,20 @@ if [[ -z "$BUMP_TYPE" ]]; then
     exit 1
 fi
 
+# Sanitize description: replace newlines and multiple spaces with single space
+if [[ -n "$DESCRIPTION" ]]; then
+    DESCRIPTION="${DESCRIPTION//$'\n'/ }"  # Replace newlines with spaces
+    DESCRIPTION="${DESCRIPTION//  / }"     # Replace double spaces with single
+    DESCRIPTION="${DESCRIPTION# }"         # Trim leading space
+    DESCRIPTION="${DESCRIPTION% }"         # Trim trailing space
+fi
+
 # Validate files exist
+if [[ ! -f "$CONSTANTS_FILE" ]]; then
+    echo -e "${RED}Error: constants.sh file not found at $CONSTANTS_FILE${RESET}"
+    exit 1
+fi
+
 if [[ ! -f "$BERANODE_FILE" ]]; then
     echo -e "${RED}Error: beranode file not found at $BERANODE_FILE${RESET}"
     exit 1
@@ -225,6 +291,10 @@ fi
 if [[ ! -f "$CHANGELOG_FILE" ]]; then
     echo -e "${RED}Error: CHANGELOG.md not found at $CHANGELOG_FILE${RESET}"
     exit 1
+fi
+
+if [[ ! -x "$BUILD_SCRIPT" ]]; then
+    echo -e "${YELLOW}Warning: build.sh not found or not executable at $BUILD_SCRIPT${RESET}"
 fi
 
 # Get current and calculate new version
@@ -260,10 +330,13 @@ fi
 echo ""
 echo -e "${BLUE}Updating version...${RESET}"
 
-update_beranode_version "$NEW_VERSION"
-echo -e "  ${GREEN}✓${RESET} Updated beranode"
+# Save the old version before updating
+OLD_VERSION="$CURRENT_VERSION"
 
-update_changelog "$NEW_VERSION"
+update_beranode_version "$NEW_VERSION"
+echo -e "  ${GREEN}✓${RESET} Updated src/lib/constants.sh and rebuilt beranode"
+
+update_changelog "$NEW_VERSION" "$OLD_VERSION" "$DESCRIPTION"
 echo -e "  ${GREEN}✓${RESET} Updated CHANGELOG.md"
 
 echo ""
@@ -286,7 +359,7 @@ if $CREATE_TAG; then
 $DESCRIPTION"
         fi
 
-        git add beranode CHANGELOG.md
+        git add src/lib/constants.sh beranode CHANGELOG.md
         git commit -m "$commit_msg"
         git tag -a "v$NEW_VERSION" -m "$tag_msg"
         echo -e "  ${GREEN}✓${RESET} Created tag v$NEW_VERSION"

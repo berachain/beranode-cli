@@ -19,6 +19,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.2.0] - 2026-01-27
+
+### Summary
+
+Support for config.toml,client.toml, and app.toml configurations to beranodes.config.json
+
+### Changed Files
+
+- `src/lib/constants.sh` - Updated BERANODE_VERSION to 0.2.0
+- `beranode` - Rebuilt from sources
+- `CHANGELOG.md` - Updated with release 0.2.0
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.2] - 2026-01-27
+
+### Changed Files
+
+- `src/lib/constants.sh` - Updated BERANODE_VERSION to 0.1.2
+- `beranode` - Rebuilt from sources
+- `CHANGELOG.md` - Updated with release 0.1.2
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.1] - 2026-01-27
+
+### Summary
+
+Add version management with description support and changelog automation
+
+### Changed Files
+
+- `src/lib/constants.sh` - Updated BERANODE_VERSION to 0.1.1
+- `beranode` - Rebuilt from sources
+- `CHANGELOG.md` - Updated with release 0.1.1
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.1.0] - 2026-01-26
 
 ### Added
@@ -27,5 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Node management commands
 - Network configuration support
 
-[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/berachain/beranode-cli/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/berachain/beranode-cli/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/berachain/beranode-cli/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/berachain/beranode-cli/releases/tag/v0.1.0
