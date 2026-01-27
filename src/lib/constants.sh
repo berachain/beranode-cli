@@ -14,7 +14,7 @@
 # =============================================================================
 # This version is automatically updated by scripts/bump-version.sh
 # Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.1.0"
+BERANODE_VERSION="0.1.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
