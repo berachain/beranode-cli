@@ -6,9 +6,247 @@
 # binary verification, and genesis file setup.
 # =============================================================================
 
+show_init_help() {
+    cat <<EOF
+beranode init - Initialize a new Berachain node configuration
+
+USAGE:
+    beranode init [OPTIONS]
+
+GENERAL OPTIONS:
+    --beranodes-dir <path>           Directory for beranodes data (default: ./beranodes)
+    --moniker <name>                Custom name for your node
+    --network <network>             Network to connect to: devnet, bepolia, mainnet (default: devnet)
+    --validators <count>            Number of validator nodes (default: 1)
+    --full-nodes <count>            Number of full nodes (default: 0)
+    --pruned-nodes <count>          Number of pruned nodes (default: 0)
+    --docker-mode                   Enable Docker mode
+    --wallet-private-key <key>      Private key for the wallet
+    --wallet-address <address>      Wallet address
+    --wallet-balance <amount>       Initial wallet balance
+    --help|-h                       Display this help message
+
+CLIENT.TOML OPTIONS:
+    --clienttoml-chain-id <id>                      Chain ID
+    --clienttoml-keyring-backend <backend>          Keyring backend
+    --clienttoml-keyring-default-keyname <name>     Default keyring keyname
+    --clienttoml-output <format>                    Output format
+    --clienttoml-node <url>                         Node URL
+    --clienttoml-broadcast-mode <mode>              Broadcast mode
+    --clienttoml-grpc-address <address>             gRPC address
+    --clienttoml-grpc-insecure <bool>               gRPC insecure mode
+
+APP.TOML OPTIONS:
+  Base Configuration:
+    --apptoml-pruning <strategy>                    Pruning strategy
+    --apptoml-pruning-keep-recent <num>             Number of recent states to keep
+    --apptoml-pruning-interval <num>                Pruning interval
+    --apptoml-halt-height <height>                  Block height to halt
+    --apptoml-halt-time <time>                      Time to halt
+    --apptoml-min-retain-blocks <num>               Minimum blocks to retain
+    --apptoml-inter-block-cache <bool>              Enable inter-block cache
+    --apptoml-iavl-cache-size <size>                IAVL cache size
+    --apptoml-iavl-disable-fastnode <bool>          Disable IAVL fastnode
+    --apptoml-app-db-backend <backend>              Application database backend
+
+  Telemetry Configuration:
+    --apptoml-telemetry-service-name <name>         Service name for telemetry
+    --apptoml-telemetry-enabled <bool>              Enable telemetry
+    --apptoml-telemetry-enable-hostname <bool>      Include hostname in metrics
+    --apptoml-telemetry-enable-hostname-label <bool> Enable hostname label
+    --apptoml-telemetry-enable-service-label <bool> Enable service label
+    --apptoml-telemetry-prometheus-retention-time <time> Prometheus retention time
+    --apptoml-telemetry-metrics-sink <sink>         Metrics sink
+    --apptoml-telemetry-statsd-addr <address>       StatsD address
+    --apptoml-telemetry-datadog-hostname <host>     Datadog hostname
+
+  BeaconKit Configuration:
+    --apptoml-beacon-kit-chain-spec <spec>          Chain specification
+    --apptoml-beacon-kit-chain-spec-file <file>     Chain specification file
+    --apptoml-beacon-kit-shutdown-timeout <time>    Shutdown timeout
+
+  BeaconKit Engine Configuration:
+    --apptoml-beacon-kit-engine-rpc-dial-url <url>              Engine RPC dial URL
+    --apptoml-beacon-kit-engine-rpc-timeout <time>              Engine RPC timeout
+    --apptoml-beacon-kit-engine-rpc-retry-interval <time>       Engine RPC retry interval
+    --apptoml-beacon-kit-engine-rpc-max-retry-interval <time>   Engine RPC max retry interval
+    --apptoml-beacon-kit-engine-rpc-startup-check-interval <time> Engine startup check interval
+    --apptoml-beacon-kit-engine-rpc-jwt-refresh-interval <time> JWT refresh interval
+    --apptoml-beacon-kit-engine-jwt-secret-path <path>          JWT secret file path
+
+  BeaconKit Logger Configuration:
+    --apptoml-beacon-kit-logger-time-format <format> Logger time format
+    --apptoml-beacon-kit-logger-log-level <level>    Logger level
+    --apptoml-beacon-kit-logger-style <style>        Logger style
+
+  BeaconKit KZG Configuration:
+    --apptoml-beacon-kit-kzg-trusted-setup-path <path> KZG trusted setup path
+    --apptoml-beacon-kit-kzg-implementation <impl>     KZG implementation
+
+  BeaconKit Payload Builder Configuration:
+    --apptoml-beacon-kit-payload-builder-enabled <bool> Enable payload builder
+    --apptoml-beacon-kit-payload-builder-suggested-fee-recipient <address> Fee recipient
+    --apptoml-beacon-kit-payload-builder-payload-timeout <time> Payload timeout
+
+  BeaconKit Validator Configuration:
+    --apptoml-beacon-kit-validator-graffiti <text>          Validator graffiti
+    --apptoml-beacon-kit-validator-availability-window <num> Availability window
+
+  BeaconKit Node API Configuration:
+    --apptoml-beacon-kit-node-api-enabled <bool>    Enable node API
+    --apptoml-beacon-kit-node-api-address <address> Node API address
+    --apptoml-beacon-kit-node-api-logging <bool>    Enable node API logging
+
+CONFIG.TOML OPTIONS:
+  Base Configuration:
+    --configtoml-version <version>                  Config version
+    --configtoml-proxy-app <url>                    Proxy app URL
+    --configtoml-db-backend <backend>               Database backend
+    --configtoml-db-dir <path>                      Database directory
+    --configtoml-log-level <level>                  Log level
+    --configtoml-log-format <format>                Log format
+    --configtoml-genesis-file <path>                Genesis file path
+    --configtoml-priv-validator-key-file <path>     Private validator key file
+    --configtoml-priv-validator-state-file <path>   Private validator state file
+    --configtoml-priv-validator-laddr <address>     Private validator listen address
+    --configtoml-node-key-file <path>               Node key file
+    --configtoml-abci <type>                        ABCI type
+    --configtoml-filter-peers <bool>                Filter peers
+
+  RPC Server Configuration:
+    --configtoml-rpc-laddr <address>                                 RPC listen address
+    --configtoml-rpc-unsafe <bool>                                   Enable unsafe RPC
+    --configtoml-rpc-cors-allowed-origins <origins>                  CORS allowed origins
+    --configtoml-rpc-cors-allowed-methods <methods>                  CORS allowed methods
+    --configtoml-rpc-cors-allowed-headers <headers>                  CORS allowed headers
+    --configtoml-rpc-max-open-connections <num>                      Max open connections
+    --configtoml-rpc-max-subscription-clients <num>                  Max subscription clients
+    --configtoml-rpc-max-subscriptions-per-client <num>              Max subscriptions per client
+    --configtoml-rpc-experimental-subscription-buffer-size <size>    Subscription buffer size
+    --configtoml-rpc-experimental-websocket-write-buffer-size <size> WebSocket write buffer size
+    --configtoml-rpc-experimental-close-on-slow-client <bool>        Close on slow client
+    --configtoml-rpc-timeout-broadcast-tx-commit <time>              Broadcast TX commit timeout
+    --configtoml-rpc-max-request-batch-size <size>                   Max request batch size
+    --configtoml-rpc-max-body-bytes <bytes>                          Max body bytes
+    --configtoml-rpc-max-header-bytes <bytes>                        Max header bytes
+    --configtoml-rpc-tls-cert-file <path>                            TLS certificate file
+    --configtoml-rpc-tls-key-file <path>                             TLS key file
+    --configtoml-rpc-pprof-laddr <address>                           Pprof listen address
+
+  gRPC Server Configuration:
+    --configtoml-grpc-laddr <address>                           gRPC listen address
+    --configtoml-grpc-version-service-enabled <bool>            Enable version service
+    --configtoml-grpc-block-service-enabled <bool>              Enable block service
+    --configtoml-grpc-block-results-service-enabled <bool>      Enable block results service
+    --configtoml-grpc-privileged-laddr <address>                Privileged gRPC address
+    --configtoml-grpc-privileged-pruning-service-enabled <bool> Enable privileged pruning service
+
+  P2P Configuration:
+    --configtoml-p2p-laddr <address>                                        P2P listen address
+    --configtoml-p2p-external-address <address>                             External address
+    --configtoml-p2p-seeds <peers>                                          Seed nodes
+    --configtoml-p2p-persistent-peers <peers>                               Persistent peers
+    --configtoml-p2p-addr-book-file <path>                                  Address book file
+    --configtoml-p2p-addr-book-strict <bool>                                Strict address book
+    --configtoml-p2p-max-num-inbound-peers <num>                            Max inbound peers
+    --configtoml-p2p-max-num-outbound-peers <num>                           Max outbound peers
+    --configtoml-p2p-unconditional-peer-ids <ids>                           Unconditional peer IDs
+    --configtoml-p2p-persistent-peers-max-dial-period <time>                Max dial period
+    --configtoml-p2p-flush-throttle-timeout <time>                          Flush throttle timeout
+    --configtoml-p2p-max-packet-msg-payload-size <size>                     Max packet message payload size
+    --configtoml-p2p-send-rate <rate>                                       Send rate
+    --configtoml-p2p-recv-rate <rate>                                       Receive rate
+    --configtoml-p2p-pex <bool>                                             Enable peer exchange
+    --configtoml-p2p-seed-mode <bool>                                       Seed mode
+    --configtoml-p2p-private-peer-ids <ids>                                 Private peer IDs
+    --configtoml-p2p-allow-duplicate-ip <bool>                              Allow duplicate IP
+    --configtoml-p2p-handshake-timeout <time>                               Handshake timeout
+    --configtoml-p2p-dial-timeout <time>                                    Dial timeout
+
+  Mempool Configuration:
+    --configtoml-mempool-type <type>                                                        Mempool type
+    --configtoml-mempool-recheck <bool>                                                     Enable recheck
+    --configtoml-mempool-recheck-timeout <time>                                             Recheck timeout
+    --configtoml-mempool-broadcast <bool>                                                   Enable broadcast
+    --configtoml-mempool-wal-dir <path>                                                     WAL directory
+    --configtoml-mempool-size <size>                                                        Mempool size
+    --configtoml-mempool-max-tx-bytes <bytes>                                               Max transaction bytes
+    --configtoml-mempool-max-txs-bytes <bytes>                                              Max transactions bytes
+    --configtoml-mempool-cache-size <size>                                                  Cache size
+    --configtoml-mempool-keep-invalid-txs-in-cache <bool>                                   Keep invalid transactions
+    --configtoml-mempool-experimental-max-gossip-connections-to-persistent-peers <num>      Max gossip to persistent peers
+    --configtoml-mempool-experimental-max-gossip-connections-to-non-persistent-peers <num>  Max gossip to non-persistent peers
+
+  State Sync Configuration:
+    --configtoml-statesync-enable <bool>                 Enable state sync
+    --configtoml-statesync-rpc-servers <servers>         RPC servers
+    --configtoml-statesync-trust-height <height>         Trust height
+    --configtoml-statesync-trust-hash <hash>             Trust hash
+    --configtoml-statesync-trust-period <time>           Trust period
+    --configtoml-statesync-discovery-time <time>         Discovery time
+    --configtoml-statesync-temp-dir <path>               Temp directory
+    --configtoml-statesync-chunk-request-timeout <time>  Chunk request timeout
+    --configtoml-statesync-chunk-fetchers <num>          Number of chunk fetchers
+
+  Block Sync Configuration:
+    --configtoml-blocksync-version <version>    Block sync version
+
+  Consensus Configuration:
+    --configtoml-consensus-wal-file <path>                            WAL file
+    --configtoml-consensus-timeout-propose <time>                     Propose timeout
+    --configtoml-consensus-timeout-propose-delta <time>               Propose delta timeout
+    --configtoml-consensus-timeout-prevote <time>                     Prevote timeout
+    --configtoml-consensus-timeout-prevote-delta <time>               Prevote delta timeout
+    --configtoml-consensus-timeout-precommit <time>                   Precommit timeout
+    --configtoml-consensus-timeout-precommit-delta <time>             Precommit delta timeout
+    --configtoml-consensus-timeout-commit <time>                      Commit timeout
+    --configtoml-consensus-skip-timeout-commit <bool>                 Skip commit timeout
+    --configtoml-consensus-double-sign-check-height <height>          Double sign check height
+    --configtoml-consensus-create-empty-blocks <bool>                 Create empty blocks
+    --configtoml-consensus-create-empty-blocks-interval <time>        Empty blocks interval
+    --configtoml-consensus-peer-gossip-sleep-duration <time>          Peer gossip sleep duration
+    --configtoml-consensus-peer-gossip-intraloop-sleep-duration <time> Intraloop sleep duration
+    --configtoml-consensus-peer-query-maj23-sleep-duration <time>     Query maj23 sleep duration
+
+  Storage Configuration:
+    --configtoml-storage-discard-abci-responses <bool>                              Discard ABCI responses
+    --configtoml-storage-experimental-db-key-layout <layout>                         DB key layout
+    --configtoml-storage-compact <bool>                                              Enable compaction
+    --configtoml-storage-compaction-interval <time>                                  Compaction interval
+    --configtoml-storage-pruning-interval <time>                                     Pruning interval
+    --configtoml-storage-pruning-data-companion-enabled <bool>                       Enable data companion pruning
+    --configtoml-storage-pruning-data-companion-initial-block-retain-height <height> Initial block retain height
+    --configtoml-storage-pruning-data-companion-initial-block-results-retain-height <height> Initial block results retain height
+
+  Transaction Indexer Configuration:
+    --configtoml-tx-index-indexer <indexer>     Transaction indexer
+    --configtoml-tx-index-psql-conn <conn>      PostgreSQL connection string
+
+  Instrumentation Configuration:
+    --configtoml-instrumentation-prometheus <bool>             Enable Prometheus metrics
+    --configtoml-instrumentation-prometheus-listen-addr <addr> Prometheus listen address
+    --configtoml-instrumentation-max-open-connections <num>    Max open connections
+    --configtoml-instrumentation-namespace <namespace>         Metrics namespace
+
+EXAMPLES:
+    beranode init --network devnet --validators 1
+    beranode init --moniker mynode --validators 2 --full-nodes 1
+    beranode init --network bepolia --validators 1 --wallet-balance 5000000000000000000000000000
+
+For more information, visit: https://github.com/berachain/beranode-cli2
+EOF
+}
+
 # Main init command
 cmd_init() {
     [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: cmd_init" >&2
+
+    # Check for help flag first
+    if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_init_help
+        return 0
+    fi
+
     print_header "Checking Dependencies"
     check_cast_version
     if [[ $? -ne 0 ]]; then
@@ -239,12 +477,12 @@ cmd_init() {
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --beranode-dir)
+            --beranodes-dir)
                 if [[ -n "$2" ]]; then
                     BERANODES_PATH="$2"
                     shift 2
                 else
-                    log_warn "--beranode-dir is not set. defaulting to ${BERANODES_PATH:-$(pwd)/beranodes}"
+                    log_warn "--beranodes-dir is not set. defaulting to ${BERANODES_PATH:-$(pwd)/beranodes}"
                     shift
                 fi
                 ;;

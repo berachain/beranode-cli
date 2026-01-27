@@ -5,14 +5,62 @@
 # starting Berachain nodes based on the configuration file.
 # =============================================================================
 
+# Display help for start command
+show_start_help() {
+    cat << EOF
+Usage: beranode start [OPTIONS]
+
+Start Berachain nodes based on the configuration file.
+
+Options:
+  --beranodes-dir <path>    Specify the beranodes directory path
+                            (default: \$PWD/beranodes)
+  --help|-h                 Display this help message
+
+Examples:
+  beranode start
+  beranode start --beranodes-dir /custom/path
+  beranode start --help
+
+EOF
+}
+
 # Start command
 cmd_start() {
     [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: cmd_start" >&2
+
+    # Parse command line arguments
+    local custom_beranodes_dir=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --beranodes-dir)
+                if [[ -z "$2" ]] || [[ "$2" == --* ]]; then
+                    log_error "Error: --beranodes-dir requires a path argument"
+                    return 1
+                fi
+                custom_beranodes_dir="$2"
+                shift 2
+                ;;
+            --help|-h)
+                show_start_help
+                return 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                show_start_help
+                return 1
+                ;;
+        esac
+    done
+
+    # Use custom beranodes directory if provided, otherwise use default
+    local beranodes_path="${custom_beranodes_dir:-$BERANODES_PATH}"
+
     print_header "Starting Beranode"
-    local beranodes_config_path="${BERANODES_PATH}/beranodes.config.json"
+    local beranodes_config_path="${beranodes_path}/beranodes.config.json"
 
     if ! [[ -f "${beranodes_config_path}" ]]; then
-        log_error "Beranode configuration file does not exist: ${BERANODES_PATH}/beranodes.config.json"
+        log_error "Beranode configuration file does not exist: ${beranodes_path}/beranodes.config.json"
         return 1
     fi
 
@@ -22,7 +70,7 @@ cmd_start() {
     log_info "Configuration file: ${beranodes_config_path}"
     jq . "${beranodes_config_path}"
 
-    local config_json_path="${BERANODES_PATH}/beranodes.config.json"
+    local config_json_path="${beranodes_path}/beranodes.config.json"
     local beranodes_dir=$(jq -r '.beranode_dir' "${config_json_path}")
     local bin_beacond="$beranodes_dir${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
     local bin_bera_reth="$beranodes_dir${BERANODES_PATH_BIN}/${BIN_BERARETH}"
