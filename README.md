@@ -79,6 +79,49 @@ Start a Berachain node that has been initialized.
 ./beranode start --moniker mynode --network devnet
 ```
 
+#### Validate Configuration
+
+```bash
+./beranode validate [config_path]
+```
+
+Validate the `beranodes.config.json` file to ensure all fields are correctly formatted using regex patterns.
+
+**Arguments:**
+- `config_path` - Path to beranodes.config.json (optional, defaults to `./beranodes/beranodes.config.json`)
+
+**What it validates:**
+- String formats (monikers, network names, paths)
+- Boolean values (true/false)
+- Integer numbers and port ranges (1-65535)
+- Ethereum addresses (0x + 40 hex chars)
+- Private keys and JWT tokens (0x + 64 hex chars)
+- BLS public keys (0x + 96 hex chars)
+- URLs and time durations (e.g., 5m0s, 10s)
+- Node and deposit object structures
+
+**Example:**
+```bash
+# Validate default config
+./beranode validate
+
+# Validate specific config file
+./beranode validate ./custom/path/beranodes.config.json
+```
+
+**Example output:**
+```
+[INFO] Starting validation of beranodes configuration
+[INFO] Config file: ./beranodes/beranodes.config.json
+
+Validating beranodes configuration: ./beranodes/beranodes.config.json
+✓ All validations passed successfully
+
+[OK] Configuration validation completed successfully!
+```
+
+For detailed documentation on validation functions and programmatic usage, see [docs/VALIDATION.md](docs/VALIDATION.md).
+
 #### Show Help
 
 ```bash
@@ -296,6 +339,25 @@ When contributing:
 1. Document your changes in the [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section
 2. Follow the existing code style and conventions
 3. Test your changes thoroughly before submitting
+
+### Code Formatting
+
+All shell scripts should be formatted using [shfmt](https://github.com/mvdan/sh):
+
+**Installation:**
+```bash
+brew install shfmt
+```
+
+**Format all shell scripts:**
+```bash
+shfmt -w .
+```
+
+**Check formatting before committing:**
+```bash
+shfmt -d .
+```
 
 ## License
 

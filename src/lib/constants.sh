@@ -14,7 +14,7 @@
 # =============================================================================
 # This version is automatically updated by scripts/bump-version.sh
 # Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.2.1"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.3.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
@@ -22,38 +22,37 @@ BERANODE_VERSION="0.2.1"  # Managed by scripts/bump-version.sh - do not edit man
 # Detect if running on Windows (PowerShell), Linux, or macOS
 readonly PLATFORM=$(uname)
 if [[ "$PLATFORM" == "Darwin" ]]; then
-    readonly IS_MACOS=true
-    readonly IS_LINUX=false
-    readonly IS_WINDOWS=false
+	readonly IS_MACOS=true
+	readonly IS_LINUX=false
+	readonly IS_WINDOWS=false
 elif [[ "$PLATFORM" == "Linux" ]]; then
-    readonly IS_MACOS=false
-    readonly IS_LINUX=true
-    readonly IS_WINDOWS=false
+	readonly IS_MACOS=false
+	readonly IS_LINUX=true
+	readonly IS_WINDOWS=false
 elif [[ "$PLATFORM" == MINGW* ]] || [[ "$PLATFORM" == CYGWIN* ]] || [[ "$PLATFORM" == MSYS* ]]; then
-    readonly IS_MACOS=false
-    readonly IS_LINUX=false
-    readonly IS_WINDOWS=true
+	readonly IS_MACOS=false
+	readonly IS_LINUX=false
+	readonly IS_WINDOWS=true
 else
-    readonly IS_MACOS=false
-    readonly IS_LINUX=false
-    readonly IS_WINDOWS=false
-    echo "error: unsupported platform: '${PLATFORM}'" >&2
-    exit 1
+	readonly IS_MACOS=false
+	readonly IS_LINUX=false
+	readonly IS_WINDOWS=false
+	echo "error: unsupported platform: '${PLATFORM}'" >&2
+	exit 1
 fi
 
 # Temporary
 if [ "$IS_MACOS" == false ]; then
-    local_red='\033[0;31m'
-    local_reset='\033[0m'
-    echo -e "${local_red}[ERROR] This script currently only supports macOS. Linux and Windows support coming soon.${local_reset}" >&2
-    exit 1
+	local_red='\033[0;31m'
+	local_reset='\033[0m'
+	echo -e "${local_red}[ERROR] This script currently only supports macOS. Linux and Windows support coming soon.${local_reset}" >&2
+	exit 1
 fi
 
-
 if [[ $(uname) == "Darwin" ]]; then
-    readonly SED_OPT=(-i '')
+	readonly SED_OPT=(-i '')
 else
-    readonly SED_OPT=(-i)
+	readonly SED_OPT=(-i)
 fi
 
 # =============================================================================
@@ -95,6 +94,7 @@ readonly BIN_BERARETH="bera-reth"
 # Beranodes Directory Structure
 # =============================================================================
 
+readonly BERANODES_PATH_DEFAULT="$(pwd)/beranodes"
 readonly BERANODES_PATH_BIN="/bin"
 readonly BERANODES_PATH_TMP="/tmp"
 readonly BERANODES_PATH_LOG="/log"
@@ -248,7 +248,7 @@ readonly APPTOML_TELEMETRY_DATADOG_HOSTNAME="my_beacond_node"
 
 # BeaconKit Configuration
 readonly APPTOML_BEACON_KIT_CHAIN_SPEC="devnet" # Ex: "devnet" | "testnet" | "mainnet"
-readonly APPTOML_BEACON_KIT_CHAIN_SPEC_FILE="" # Ex: "./testing/networks/80094/chain-spec.json"
+readonly APPTOML_BEACON_KIT_CHAIN_SPEC_FILE=""  # Ex: "./testing/networks/80094/chain-spec.json"
 readonly APPTOML_BEACON_KIT_SHUTDOWN_TIMEOUT="5m0s"
 
 # BeaconKit Engine Configuration
