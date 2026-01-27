@@ -226,6 +226,7 @@ Use the [scripts/bump-version.sh](scripts/bump-version.sh) script to manage vers
 
 - `--dry-run` - Preview changes without modifying files
 - `--tag` - Automatically create a git tag and commit
+- `-m, --message TEXT` - Add a description of changes for commit and tag messages
 - `-h, --help` - Show help information
 
 ### Examples
@@ -238,6 +239,11 @@ Use the [scripts/bump-version.sh](scripts/bump-version.sh) script to manage vers
 **Bump version and create a git tag:**
 ```bash
 ./scripts/bump-version.sh minor --tag
+```
+
+**Bump version with a description:**
+```bash
+./scripts/bump-version.sh patch --tag -m "Fix authentication bug and improve error handling"
 ```
 
 **Manual release workflow:**
@@ -258,6 +264,16 @@ git tag -a v0.2.0 -m "Release v0.2.0"
 git push origin main --tags
 ```
 
+**Automated release workflow with description:**
+```bash
+# 1. Update CHANGELOG.md with your changes
+# 2. Bump version, commit, and tag in one step
+./scripts/bump-version.sh minor --tag -m "Add new user profile feature"
+
+# 3. Push to remote
+git push origin main --tags
+```
+
 ### What the Script Does
 
 The `bump-version.sh` script automatically:
@@ -265,6 +281,7 @@ The `bump-version.sh` script automatically:
 2. Moves unreleased changes in [CHANGELOG.md](CHANGELOG.md) to a new version section
 3. Updates version comparison links in the changelog
 4. Optionally creates a git commit and tag (with `--tag` flag)
+5. Includes a custom description in commit and tag messages (with `-m, --message` flag)
 
 ## Contributing
 

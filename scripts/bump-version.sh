@@ -40,14 +40,16 @@ ${BOLD}EXPLICIT VERSION${RESET}
     X.Y.Z       Set to specific version (e.g., 1.2.3)
 
 ${BOLD}OPTIONS${RESET}
-    -h, --help  Show this help message
-    --dry-run   Show what would change without modifying files
-    --tag       Create a git tag after bumping
+    -h, --help          Show this help message
+    --dry-run           Show what would change without modifying files
+    --tag               Create a git tag after bumping
+    -m, --message TEXT  Description of changes for commit/tag message
 
 ${BOLD}EXAMPLES${RESET}
     ./scripts/bump-version.sh patch
     ./scripts/bump-version.sh minor --tag
     ./scripts/bump-version.sh 2.0.0 --dry-run
+    ./scripts/bump-version.sh patch --tag -m "Fix authentication bug"
 EOF
 }
 
@@ -165,6 +167,7 @@ show_diff() {
 DRY_RUN=false
 CREATE_TAG=false
 BUMP_TYPE=""
+DESCRIPTION=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -179,6 +182,15 @@ while [[ $# -gt 0 ]]; do
         --tag)
             CREATE_TAG=true
             shift
+            ;;
+        -m|--message)
+            if [[ -n "$2" ]]; then
+                DESCRIPTION="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --message requires a description${RESET}"
+                exit 1
+            fi
             ;;
         major|minor|patch)
             BUMP_TYPE="$1"
@@ -262,9 +274,21 @@ if $CREATE_TAG; then
     if command -v git &> /dev/null && git rev-parse --is-inside-work-tree &> /dev/null 2>&1; then
         echo ""
         echo -e "${BLUE}Creating git tag...${RESET}"
+
+        # Build commit and tag messages
+        commit_msg="chore: release v$NEW_VERSION"
+        tag_msg="Release v$NEW_VERSION"
+
+        if [[ -n "$DESCRIPTION" ]]; then
+            commit_msg="chore: release v$NEW_VERSION - $DESCRIPTION"
+            tag_msg="Release v$NEW_VERSION
+
+$DESCRIPTION"
+        fi
+
         git add beranode CHANGELOG.md
-        git commit -m "chore: release v$NEW_VERSION"
-        git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+        git commit -m "$commit_msg"
+        git tag -a "v$NEW_VERSION" -m "$tag_msg"
         echo -e "  ${GREEN}✓${RESET} Created tag v$NEW_VERSION"
         echo ""
         echo "To push the release:"
@@ -277,6 +301,13 @@ fi
 echo ""
 echo -e "${BOLD}Next steps:${RESET}"
 echo "  1. Review changes: git diff"
-echo "  2. Commit: git add -A && git commit -m 'chore: release v$NEW_VERSION'"
-echo "  3. Tag: git tag -a v$NEW_VERSION -m 'Release v$NEW_VERSION'"
+if [[ -n "$DESCRIPTION" ]]; then
+    echo "  2. Commit: git add -A && git commit -m 'chore: release v$NEW_VERSION - $DESCRIPTION'"
+    echo "  3. Tag: git tag -a v$NEW_VERSION -m 'Release v$NEW_VERSION"
+    echo ""
+    echo "$DESCRIPTION'"
+else
+    echo "  2. Commit: git add -A && git commit -m 'chore: release v$NEW_VERSION'"
+    echo "  3. Tag: git tag -a v$NEW_VERSION -m 'Release v$NEW_VERSION'"
+fi
 echo "  4. Push: git push origin main --tags"

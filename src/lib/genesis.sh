@@ -1005,7 +1005,7 @@ generate_beacond_keys() {
   fi
 
   # Clean up any existing beacond directory
-  if [ -d "${config_dir}/tmp/beacond" ]; then
+  if [[ -d "${config_dir}/tmp/beacond" ]]; then
     log_info "Removing existing beacond directory at ${config_dir}/tmp/beacond"
     rm -rf "${config_dir}/tmp/beacond";
     if [[ $? -ne 0 ]]; then
@@ -1160,13 +1160,13 @@ generate_beacond_keys() {
     mv "${tmp_beranode_config}" "${beranode_config_file}"
 
     # Clean up the tmp/beacond folder for each iteration
-    if [ -d "${config_dir}/tmp/beacond" ]; then
+    if [[ -d "${config_dir}/tmp/beacond" ]]; then
       rm -rf "${config_dir}/tmp/beacond"
       if [[ $? -ne 0 ]]; then
         log_error "Failed to clean up ${config_dir}/tmp/beacond before initializing node ${moniker}"
         return 1
       fi
-      log_info "Cleaned up ${config_dir}/tmp/beacond before initializing node ${moniker}"
+        log_info "Cleaned up ${config_dir}/tmp/beacond before initializing node ${moniker}"
     fi
 
     log_success "Added node_key to node $((i-1)) in ${beranode_config_file}"

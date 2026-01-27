@@ -39,7 +39,7 @@ EOF
 
 show_version() {
     [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: show_version" >&2
-    echo "beranode v0.1.0"
+    echo "beranode v${BERANODE_VERSION}"
 }
 
 show_interactive_menu() {
