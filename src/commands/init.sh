@@ -3,7 +3,7 @@
 # BERANODE INIT COMMAND
 # =============================================================================
 # File: src/commands/init.sh
-# Version: Compatible with Beranode CLI v0.2.1
+# Version: Compatible with Beranode CLI v0.4.1
 # Description: Initializes Berachain node configurations including validator,
 #              full nodes, and pruned nodes with comprehensive configuration
 #              management for client.toml, app.toml, and config.toml files.
@@ -61,9 +61,9 @@
 #      └─ Generate beacond genesis.json
 #
 # =============================================================================
-# RELATIONSHIP TO CURRENT VERSION (v0.2.1)
+# RELATIONSHIP TO CURRENT VERSION (v0.4.1)
 # =============================================================================
-# This init.sh file is part of the Beranode CLI v0.2.1 and works in
+# This init.sh file is part of the Beranode CLI v0.4.1 and works in
 # conjunction with:
 #
 # - src/lib/constants.sh     : Provides network constants, default ports, and

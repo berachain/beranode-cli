@@ -4,12 +4,12 @@
 # build.sh - Beranode CLI Build Script
 # =============================================================================
 #
-# VERSION: Compatible with Beranode v0.2.1
+# VERSION: Compatible with Beranode v0.4.1
 #
 # PURPOSE:
 #   Combines all modular source files from src/ into a single executable
 #   beranode file for distribution. This build system supports the modular
-#   architecture introduced in v0.2.0+ while maintaining a single-file
+#   architecture introduced in v0.4.1+ while maintaining a single-file
 #   distribution model for ease of deployment.
 #
 # USAGE:
@@ -78,7 +78,7 @@ BLUE='\033[0;34m'
 YELLOW='\033[0;33m'
 RESET='\033[0m'
 
-echo -e "${BLUE}Building beranode CLI v0.2.1...${RESET}"
+echo -e "${BLUE}Building beranode CLI v0.4.1...${RESET}"
 
 # =============================================================================
 # [2] VALIDATION
@@ -238,10 +238,10 @@ echo -e "${BLUE}  Lines: $(wc -l <"$OUTPUT_FILE")${RESET}"
 echo -e "${BLUE}  Size: $(du -h "$OUTPUT_FILE" | cut -f1)${RESET}"
 
 # =============================================================================
-# VERSION CONTEXT FOR v0.2.1
+# VERSION CONTEXT FOR v0.4.1
 # =============================================================================
 #
-# This build script was designed for beranode v0.2.1, which includes:
+# This build script was designed for beranode v0.4.1, which includes:
 #
 # - Modular architecture with separated concerns (lib/, commands/, core/)
 # - Support for init and start commands with --help options

@@ -16,7 +16,7 @@
 # init → generate_eth_genesis_file → generate_beacond_keys →
 #        generate_beacond_genesis → create_validator_node → start
 #
-# VERSION CONTEXT (v0.2.1):
+# VERSION CONTEXT (v0.4.1):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)

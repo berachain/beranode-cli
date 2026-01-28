@@ -107,6 +107,39 @@ update_beranode_version() {
 	fi
 }
 
+update_shell_files() {
+	local new_version="$1"
+
+	echo -e "${BLUE}Updating version strings in .sh files...${RESET}"
+
+	# Find all .sh files in the project (excluding this script and node_modules)
+	local sh_files
+	sh_files=$(find "$ROOT_DIR" -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*")
+
+	local updated_count=0
+
+	while IFS= read -r file; do
+		# Skip if file doesn't exist or isn't readable
+		[[ ! -f "$file" || ! -r "$file" ]] && continue
+
+		# Use sed to replace all version strings in format vX.X.X with the new version
+		# The pattern matches v followed by one or more digits, dot, one or more digits, dot, one or more digits
+		if sed -i.bak -E "s/v[0-9]+\.[0-9]+\.[0-9]+/v$new_version/g" "$file" 2>/dev/null; then
+			# Check if file actually changed
+			if ! cmp -s "$file" "$file.bak"; then
+				((updated_count++))
+			fi
+			rm -f "$file.bak"
+		fi
+	done <<< "$sh_files"
+
+	if [[ $updated_count -gt 0 ]]; then
+		echo -e "  ${GREEN}✓${RESET} Updated version strings in $updated_count .sh file(s)"
+	else
+		echo -e "  ${YELLOW}ℹ${RESET} No version strings found to update in .sh files"
+	fi
+}
+
 update_changelog() {
 	local new_version="$1"
 	local old_version="$2"
@@ -212,6 +245,7 @@ show_diff() {
 	echo -e "${BOLD}Files to be modified:${RESET}"
 	echo "  - src/lib/constants.sh (BERANODE_VERSION)"
 	echo "  - beranode (rebuilt from sources)"
+	echo "  - All .sh files (version strings vX.X.X -> v$new)"
 	echo "  - CHANGELOG.md ([Unreleased] -> [$new])"
 	echo ""
 }
@@ -336,11 +370,19 @@ OLD_VERSION="$CURRENT_VERSION"
 update_beranode_version "$NEW_VERSION"
 echo -e "  ${GREEN}✓${RESET} Updated src/lib/constants.sh and rebuilt beranode"
 
+update_shell_files "$NEW_VERSION"
+
 update_changelog "$NEW_VERSION" "$OLD_VERSION" "$DESCRIPTION"
 echo -e "  ${GREEN}✓${RESET} Updated CHANGELOG.md"
 
 echo ""
 echo -e "${GREEN}Version bumped to $NEW_VERSION${RESET}"
+
+# Show changed files
+echo ""
+echo -e "${BOLD}Changed files:${RESET}"
+git diff --name-only main | sed 's/^/- /'
+echo ""
 
 # Create git tag if requested
 if $CREATE_TAG; then
@@ -359,7 +401,9 @@ if $CREATE_TAG; then
 $DESCRIPTION"
 		fi
 
+		# Add all modified files (constants, beranode, CHANGELOG, and any updated .sh files)
 		git add src/lib/constants.sh beranode CHANGELOG.md
+		find "$ROOT_DIR" -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" -exec git add {} + 2>/dev/null || true
 		git commit -m "$commit_msg"
 		git tag -a "v$NEW_VERSION" -m "$tag_msg"
 		echo -e "  ${GREEN}✓${RESET} Created tag v$NEW_VERSION"

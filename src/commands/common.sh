@@ -7,7 +7,7 @@
 # commands (init, start, etc.). It serves as a central repository for command
 # utilities that are needed by more than one command module.
 #
-# VERSION CONTEXT - Beranode CLI v0.2.1:
+# VERSION CONTEXT - Beranode CLI v0.4.1:
 # ──────────────────────────────────────────────────────────────────────────────
 # In the current version (0.2.1), this module is structured as a placeholder
 # for future common command functionality. As the CLI evolves and patterns

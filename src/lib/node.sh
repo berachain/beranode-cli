@@ -10,8 +10,8 @@
 #   operations in the Beranode CLI. It provides functions for creating,
 #   starting, stopping, and monitoring Berachain validator and full nodes.
 #
-# RELATIONSHIP TO v0.2.1:
-#   This module is being structured in v0.2.1 to consolidate node management
+# RELATIONSHIP TO v0.4.1:
+#   This module is being structured in v0.4.1 to consolidate node management
 #   functions that are currently distributed across genesis.sh and command
 #   modules. This refactoring will provide a clean separation of concerns:
 #   - genesis.sh: Genesis file generation and blockchain initialization
@@ -101,7 +101,7 @@
 # Notes:
 #   - Validator nodes require staking to participate in consensus
 #   - This function is typically called during the init process
-#   - Current implementation status: Partially implemented (v0.2.1)
+#   - Current implementation status: Partially implemented (v0.4.1)
 #   - Full implementation planned for v0.3.x
 # -----------------------------------------------------------------------------
 create_validator_node() {
@@ -133,7 +133,7 @@ create_validator_node() {
 	# - Configure port mappings
 	# - Initialize validator state
 
-	log_warn "Validator node creation not yet fully implemented in v0.2.1"
+	log_warn "Validator node creation not yet fully implemented in v0.4.1"
 	return 1
 }
 
@@ -165,7 +165,7 @@ create_full_node() {
 	# - Configure as non-validating node
 	# - Set up RPC endpoints
 
-	log_warn "Full node creation not yet implemented in v0.2.1"
+	log_warn "Full node creation not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -197,7 +197,7 @@ create_pruned_node() {
 	# - Set retention policies
 	# - Minimize storage footprint
 
-	log_warn "Pruned node creation not yet implemented in v0.2.1"
+	log_warn "Pruned node creation not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -245,7 +245,7 @@ start_node() {
 	# - Monitor startup process
 	# - Verify node is healthy
 
-	log_warn "Node start functionality not yet implemented in v0.2.1"
+	log_warn "Node start functionality not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -281,7 +281,7 @@ stop_node() {
 	# - Verify processes have terminated
 	# - Clean up PID files
 
-	log_warn "Node stop functionality not yet implemented in v0.2.1"
+	log_warn "Node stop functionality not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -314,7 +314,7 @@ restart_node() {
 	# - Call start_node()
 	# - Verify successful startup
 
-	log_warn "Node restart functionality not yet implemented in v0.2.1"
+	log_warn "Node restart functionality not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -349,7 +349,7 @@ kill_node() {
 	# - Clean up PID files
 	# - Log warning about non-graceful shutdown
 
-	log_warn "Node kill functionality not yet implemented in v0.2.1"
+	log_warn "Node kill functionality not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -389,7 +389,7 @@ get_node_status() {
 	# - Query health endpoints
 	# - Return status string
 
-	log_warn "Node status checking not yet implemented in v0.2.1"
+	log_warn "Node status checking not yet implemented in v0.4.1"
 	echo "unknown"
 	return 1
 }
@@ -425,7 +425,7 @@ get_node_pid() {
 	# - Verify process exists
 	# - Return PID
 
-	log_warn "PID retrieval not yet implemented in v0.2.1"
+	log_warn "PID retrieval not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -461,7 +461,7 @@ tail_node_logs() {
 	# - Support filtering by component
 	# - Handle log rotation
 
-	log_warn "Log tailing not yet implemented in v0.2.1"
+	log_warn "Log tailing not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -505,7 +505,7 @@ get_node_health() {
 	# - Count connected peers
 	# - Return JSON health report
 
-	log_warn "Health checking not yet implemented in v0.2.1"
+	log_warn "Health checking not yet implemented in v0.4.1"
 	echo "{}"
 	return 1
 }
@@ -565,7 +565,7 @@ configure_node_ports() {
 	# - Configure Prometheus metrics endpoints
 	# - Set up RPC CORS and authentication
 
-	log_warn "Port configuration not yet implemented in v0.2.1"
+	log_warn "Port configuration not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -608,7 +608,7 @@ update_node_config() {
 	# - Validate updated configuration
 	# - Restore backup if validation fails
 
-	log_warn "Config update not yet implemented in v0.2.1"
+	log_warn "Config update not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -653,7 +653,7 @@ setup_node_directories() {
 	# - Set permissions
 	# - Create necessary subdirectories
 
-	log_warn "Directory setup not yet implemented in v0.2.1"
+	log_warn "Directory setup not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -692,7 +692,7 @@ validate_node_config() {
 	# - Verify file paths
 	# - Check for conflicting settings
 
-	log_warn "Config validation not yet implemented in v0.2.1"
+	log_warn "Config validation not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -733,7 +733,7 @@ get_node_id() {
 	# - Derive node ID from public key
 	# - Return hex-encoded ID
 
-	log_warn "Node ID retrieval not yet implemented in v0.2.1"
+	log_warn "Node ID retrieval not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -774,7 +774,7 @@ setup_peer_connections() {
 	# - Configure peer connection settings
 	# - Set max inbound/outbound peers
 
-	log_warn "Peer connection setup not yet implemented in v0.2.1"
+	log_warn "Peer connection setup not yet implemented in v0.4.1"
 	return 1
 }
 
@@ -811,14 +811,14 @@ generate_node_key() {
 	# - Set secure permissions
 	# - Return node ID
 
-	log_warn "Node key generation not yet implemented in v0.2.1"
+	log_warn "Node key generation not yet implemented in v0.4.1"
 	return 1
 }
 
 ################################################################################
 # MODULE FOOTER
 ################################################################################
-# This module is part of the Beranode CLI v0.2.1
+# This module is part of the Beranode CLI v0.4.1
 # For updates and documentation, visit: https://github.com/berachain/beranode-cli2
 #
 # Related modules:
