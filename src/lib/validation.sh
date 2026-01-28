@@ -71,7 +71,7 @@ validate_integer() {
 validate_port() {
 	local value="$1"
 	if [[ "$value" =~ ^[0-9]+$ ]]; then
-		(( value > 0 && value <= 65535 ))
+		((value > 0 && value <= 65535))
 	else
 		return 1
 	fi
@@ -267,61 +267,69 @@ validate_config_field() {
 	local value="$2"
 
 	case "$field" in
-		# Empty strings or simple strings allowed for optional fields (check first!)
-		*_keyring_default_keyname|*_graffiti|*_cors_*|*_wal_dir|*_external_address|*_seeds|*_persistent_peers|*_global_labels|*_metrics_sink|*_statsd_addr|*_chain_spec_file|*_priv_validator_laddr|*_tls_*_file|*_pprof_laddr|*_grpc_*_laddr|*_unconditional_peer_ids|*_private_peer_ids|*_rpc_servers|*_trust_hash|*_temp_dir|*_psql_conn|*_grpc_address)
-			return 0 ;;
+	# Empty strings or simple strings allowed for optional fields (check first!)
+	*_keyring_default_keyname | *_graffiti | *_cors_* | *_wal_dir | *_external_address | *_seeds | *_persistent_peers | *_global_labels | *_metrics_sink | *_statsd_addr | *_chain_spec_file | *_priv_validator_laddr | *_tls_*_file | *_pprof_laddr | *_grpc_*_laddr | *_unconditional_peer_ids | *_private_peer_ids | *_rpc_servers | *_trust_hash | *_temp_dir | *_psql_conn | *_grpc_address)
+		return 0
+		;;
 
-		# Boolean fields (must be specific!)
-		skip_genesis|force|*_enabled|*_strict|*_unsafe|*_close_on_slow_client|*_keep_invalid_txs_in_cache|*_inter_block_cache|*_cache|*_broadcast|*_recheck|*_pex|*_seed_mode|*_disable_fastnode|*_addr_book_strict|*_allow_duplicate_ip|*_logging|apptoml_telemetry_enabled|apptoml_telemetry_enable_hostname|apptoml_telemetry_enable_hostname_label|apptoml_telemetry_enable_service_label|*_skip_timeout_commit|*_create_empty_blocks|*_discard_abci_responses|*_compact|configtoml_instrumentation_prometheus|configtoml_statesync_enable|configtoml_rpc_unsafe|configtoml_filter_peers|*_pruning_*_enabled|*_service_enabled)
-			validate_boolean "$value" ;;
+	# Boolean fields (must be specific!)
+	skip_genesis | force | *_enabled | *_strict | *_unsafe | *_close_on_slow_client | *_keep_invalid_txs_in_cache | *_inter_block_cache | *_cache | *_broadcast | *_recheck | *_pex | *_seed_mode | *_disable_fastnode | *_addr_book_strict | *_allow_duplicate_ip | *_logging | apptoml_telemetry_enabled | apptoml_telemetry_enable_hostname | apptoml_telemetry_enable_hostname_label | apptoml_telemetry_enable_service_label | *_skip_timeout_commit | *_create_empty_blocks | *_discard_abci_responses | *_compact | configtoml_instrumentation_prometheus | configtoml_statesync_enable | configtoml_rpc_unsafe | configtoml_filter_peers | *_pruning_*_enabled | *_service_enabled)
+		validate_boolean "$value"
+		;;
 
-		# Top-level fields
-		moniker|configtoml_moniker) validate_moniker "$value" ;;
-		network|apptoml_beacon_kit_chain_spec) validate_network "$value" ;;
-		validators|full_nodes|pruned_nodes|total_nodes) validate_integer "$value" ;;
-		beranode_dir|genesis_file|genesis_eth_file|*_path|*_file|*_dir) validate_path "$value" ;;
-		mode) validate_mode "$value" ;;
-		wallet_private_key) validate_hex_private_key "$value" ;;
-		wallet_address)
-			[[ -z "$value" ]] || validate_hex_address "$value" ;;
-		wallet_balance|deposit_amount) validate_hex_string "$value" || validate_integer "$value" ;;
-		validator_root) validate_hex_string "$value" ;;
-		*_suggested_fee_recipient) validate_hex_address "$value" ;;
+	# Top-level fields
+	moniker | configtoml_moniker) validate_moniker "$value" ;;
+	network | apptoml_beacon_kit_chain_spec) validate_network "$value" ;;
+	validators | full_nodes | pruned_nodes | total_nodes) validate_integer "$value" ;;
+	beranode_dir | genesis_file | genesis_eth_file | *_path | *_file | *_dir) validate_path "$value" ;;
+	mode) validate_mode "$value" ;;
+	wallet_private_key) validate_hex_private_key "$value" ;;
+	wallet_address)
+		[[ -z "$value" ]] || validate_hex_address "$value"
+		;;
+	wallet_balance | deposit_amount) validate_hex_string "$value" || validate_integer "$value" ;;
+	validator_root) validate_hex_string "$value" ;;
+	*_suggested_fee_recipient) validate_hex_address "$value" ;;
 
-		# Port fields (more specific than _address patterns)
-		*_port|*ethrpc_port|*ethp2p_port|*ethproxy_port|*authrpc_port|*eth_port|*prometheus_port)
-			validate_port "$value" ;;
+	# Port fields (more specific than _address patterns)
+	*_port | *ethrpc_port | *ethp2p_port | *ethproxy_port | *authrpc_port | *eth_port | *prometheus_port)
+		validate_port "$value"
+		;;
 
-		# URL/Address fields (allow PORT_DEFINED_BY_NODE placeholder)
-		*_dial_url|*_laddr|*_address)
-			[[ "$value" =~ \<PORT_DEFINED_BY_NODE\> ]] || [[ -z "$value" ]] || validate_url "$value" || [[ "$value" =~ ^[0-9.:] ]] || return 0 ;;
+	# URL/Address fields (allow PORT_DEFINED_BY_NODE placeholder)
+	*_dial_url | *_laddr | *_address)
+		[[ "$value" =~ \<PORT_DEFINED_BY_NODE\> ]] || [[ -z "$value" ]] || validate_url "$value" || [[ "$value" =~ ^[0-9.:] ]] || return 0
+		;;
 
-		# Duration fields (specific timeout/interval/period patterns)
-		*_timeout|*_period|apptoml_beacon_kit_shutdown_timeout|apptoml_beacon_kit_engine_rpc_*|apptoml_beacon_kit_payload_builder_payload_timeout|configtoml_p2p_persistent_peers_max_dial_period|configtoml_p2p_flush_throttle_timeout|configtoml_p2p_handshake_timeout|configtoml_p2p_dial_timeout|configtoml_mempool_recheck_timeout|configtoml_statesync_trust_period|configtoml_statesync_discovery_time|configtoml_statesync_chunk_request_timeout|configtoml_consensus_timeout_*|configtoml_consensus_peer_*_duration|configtoml_storage_pruning_interval)
-			validate_duration "$value" ;;
+	# Duration fields (specific timeout/interval/period patterns)
+	*_timeout | *_period | apptoml_beacon_kit_shutdown_timeout | apptoml_beacon_kit_engine_rpc_* | apptoml_beacon_kit_payload_builder_payload_timeout | configtoml_p2p_persistent_peers_max_dial_period | configtoml_p2p_flush_throttle_timeout | configtoml_p2p_handshake_timeout | configtoml_p2p_dial_timeout | configtoml_mempool_recheck_timeout | configtoml_statesync_trust_period | configtoml_statesync_discovery_time | configtoml_statesync_chunk_request_timeout | configtoml_consensus_timeout_* | configtoml_consensus_peer_*_duration | configtoml_storage_pruning_interval)
+		validate_duration "$value"
+		;;
 
-		# Integer interval/window fields (after duration patterns)
-		configtoml_storage_compaction_interval|apptoml_pruning_interval|*_pruning_keep_recent|*_availability_window)
-			validate_integer "$value" ;;
+	# Integer interval/window fields (after duration patterns)
+	configtoml_storage_compaction_interval | apptoml_pruning_interval | *_pruning_keep_recent | *_availability_window)
+		validate_integer "$value"
+		;;
 
-		# Chain ID
-		*chain_id) validate_string "$value" ;;
+	# Chain ID
+	*chain_id) validate_string "$value" ;;
 
-		# Integer configuration values
-		*_height|*_retain_*|*_max_*|*_keep_*|apptoml_halt_*|apptoml_min_*|apptoml_iavl_cache_size|apptoml_telemetry_prometheus_retention_time|configtoml_*_buffer_size|configtoml_*_batch_size|configtoml_*_body_bytes|configtoml_*_header_bytes|configtoml_mempool_size|configtoml_mempool_max_tx_bytes|configtoml_mempool_max_txs_bytes|configtoml_mempool_cache_size|configtoml_mempool_experimental_*|configtoml_storage_compaction_interval|configtoml_*_send_rate|configtoml_*_recv_rate|configtoml_*_num_*_peers|configtoml_*_packet_*|configtoml_instrumentation_max_open_connections|configtoml_statesync_trust_height|configtoml_statesync_chunk_fetchers|configtoml_consensus_double_sign_check_height|configtoml_*_pruning_*_retain_height)
-			validate_integer "$value" ;;
+	# Integer configuration values
+	*_height | *_retain_* | *_max_* | *_keep_* | apptoml_halt_* | apptoml_min_* | apptoml_iavl_cache_size | apptoml_telemetry_prometheus_retention_time | configtoml_*_buffer_size | configtoml_*_batch_size | configtoml_*_body_bytes | configtoml_*_header_bytes | configtoml_mempool_size | configtoml_mempool_max_tx_bytes | configtoml_mempool_max_txs_bytes | configtoml_mempool_cache_size | configtoml_mempool_experimental_* | configtoml_storage_compaction_interval | configtoml_*_send_rate | configtoml_*_recv_rate | configtoml_*_num_*_peers | configtoml_*_packet_* | configtoml_instrumentation_max_open_connections | configtoml_statesync_trust_height | configtoml_statesync_chunk_fetchers | configtoml_consensus_double_sign_check_height | configtoml_*_pruning_*_retain_height)
+		validate_integer "$value"
+		;;
 
-		# Backend/type/implementation strings
-		*_backend|*_db_backend|*_type|*_implementation|*_indexer|*_abci) validate_string "$value" ;;
+	# Backend/type/implementation strings
+	*_backend | *_db_backend | *_type | *_implementation | *_indexer | *_abci) validate_string "$value" ;;
 
-		# Versions
-		*_version) validate_string "$value" ;;
+	# Versions
+	*_version) validate_string "$value" ;;
 
-		# Log levels, formats, styles, names, hostnames
-		*_log_level|*_log_format|*_style|*_output|*_time_format|*_service_name|apptoml_telemetry_datadog_hostname|*_namespace|*_experimental_db_key_layout) validate_string "$value" ;;
+	# Log levels, formats, styles, names, hostnames
+	*_log_level | *_log_format | *_style | *_output | *_time_format | *_service_name | apptoml_telemetry_datadog_hostname | *_namespace | *_experimental_db_key_layout) validate_string "$value" ;;
 
-		# Default: non-empty string
-		*) validate_string "$value" ;;
+	# Default: non-empty string
+	*) validate_string "$value" ;;
 	esac
 }
 
@@ -360,11 +368,11 @@ validate_beranodes_config() {
 			echo "  ✗ Field '$field' failed validation: '$value'" >&2
 			((validation_errors++))
 		fi
-	done <<< "$fields"
+	done <<<"$fields"
 
 	# Validate nodes array
 	local nodes_count=$(jq '.nodes | length' "$config_file")
-	for ((i=0; i<nodes_count; i++)); do
+	for ((i = 0; i < nodes_count; i++)); do
 		local node=$(jq ".nodes[$i]" "$config_file")
 		if ! validate_node_object "$node"; then
 			echo "  ✗ Node $i validation failed: $VALIDATION_ERROR" >&2
@@ -374,7 +382,7 @@ validate_beranodes_config() {
 
 	# Validate genesis_deposits array
 	local deposits_count=$(jq '.genesis_deposits | length' "$config_file")
-	for ((i=0; i<deposits_count; i++)); do
+	for ((i = 0; i < deposits_count; i++)); do
 		local deposit=$(jq ".genesis_deposits[$i]" "$config_file")
 		if ! validate_deposit_object "$deposit"; then
 			echo "  ✗ Genesis deposit $i validation failed: $VALIDATION_ERROR" >&2

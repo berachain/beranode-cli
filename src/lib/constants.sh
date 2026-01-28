@@ -14,7 +14,7 @@
 # =============================================================================
 # This version is automatically updated by scripts/bump-version.sh
 # Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.3.0"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.4.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
@@ -76,12 +76,14 @@ readonly DEFAULT_CL_ETHRPC_PORT=26657
 readonly DEFAULT_CL_ETHP2P_PORT=26656
 readonly DEFAULT_CL_ETHPROXY_PORT=26658
 readonly DEFAULT_EL_ETHRPC_PORT=8545
+readonly DEFAULT_EL_WS_PORT=8546
 readonly DEFAULT_EL_AUTHRPC_PORT=8551
 readonly DEFAULT_DEFAULT_EL_ETH_PORT=30303
 readonly DEFAULT_EL_PROMETHEUS_PORT=9101
-readonly DEFAULT_CL_PROMETHEUS_PORT=9102
+readonly DEFAULT_CL_PROMETHEUS_PORT=26660
 readonly DEFAULT_PORT_INCREMENT=100
 readonly DEFAULT_WALLET_BALANCE=1000000000000000000000000000
+readonly DEFAULT_BEACON_NODE_API_PORT=3500
 
 # =============================================================================
 # Binary Names
@@ -97,8 +99,9 @@ readonly BIN_BERARETH="bera-reth"
 readonly BERANODES_PATH_DEFAULT="$(pwd)/beranodes"
 readonly BERANODES_PATH_BIN="/bin"
 readonly BERANODES_PATH_TMP="/tmp"
-readonly BERANODES_PATH_LOG="/log"
+readonly BERANODES_PATH_LOGS="/logs"
 readonly BERANODES_PATH_NODES="/nodes"
+readonly BERANODES_PATH_RUNS="/runs"
 
 readonly SUPPORTED_CAST_VERSION="1.4.3"
 BERANODES_PATH=${BERANODES_PATH:-$(pwd)/beranodes}

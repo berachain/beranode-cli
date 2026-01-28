@@ -221,7 +221,7 @@ create_pruned_node() {
 #
 # Side Effects:
 #   - Launches beacond and bera-reth as background processes
-#   - Creates log files in <beranodes_dir>/log/
+#   - Creates log files in <beranodes_dir>/logs/
 #   - Writes process IDs to PID files
 #   - Performs initial health check
 #

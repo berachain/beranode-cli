@@ -69,7 +69,7 @@ cmd_validate() {
 
 # Show help
 cmd_validate_help() {
-	cat << EOF
+	cat <<EOF
 Validate beranodes configuration file
 
 USAGE:

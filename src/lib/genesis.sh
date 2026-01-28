@@ -60,7 +60,8 @@ generate_eth_genesis_file() {
 	#   - 80094: Berachain mainnet
 	# -------------------------------------------------------------------------
 	local genesis_file_path=""
-	local chain_id="80087" # Default: Berachain devnet chain ID
+	local chain_id="$CHAIN_ID_DEVNET" # Default: Berachain devnet chain ID
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 
 	# -------------------------------------------------------------------------
 	# Section 1.2: Ethereum Hard Fork Activation Blocks
@@ -1152,6 +1153,7 @@ generate_beacond_keys() {
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id="$3"
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -1165,10 +1167,13 @@ generate_beacond_keys() {
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
 				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
 				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id_beacond="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
 				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id_beacond="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				return 1
@@ -1222,13 +1227,13 @@ generate_beacond_keys() {
 	fi
 
 	echo "Initializing beacond nodes..."
-	for i in $(seq 1 ${nodes_count}); do
-		node_json=$(echo "$nodes_json" | jq ".[$i-1]")
+	for ((i = 0; i < nodes_count; i++)); do
+		node_json=$(echo "$nodes_json" | jq ".[$i]")
 		local moniker=$(echo "$node_json" | jq -r '.moniker')
 		local role=$(echo "$node_json" | jq -r '.role')
 
 		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 			return 1
@@ -1264,6 +1269,12 @@ generate_beacond_keys() {
 		validator_keys="$(${beacond_binary} deposit validator-keys --home ${config_dir}/tmp/beacond)"
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to read validator keys at ${config_dir}/tmp/beacond"
+			return 1
+		fi
+
+		node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+		if [[ $? -ne 0 ]]; then
+			log_error "Failed to read node id at ${config_dir}/tmp/beacond"
 			return 1
 		fi
 
@@ -1315,12 +1326,13 @@ generate_beacond_keys() {
 
 		# Build json object with the validator keys
 		tmp_beranode_config="${beranode_config_file}.tmp"
-		jq --arg idx "$((i - 1))" \
+		jq --arg idx "$((i))" \
 			--argjson node_key "$node_key_json" \
 			--argjson priv_validator_key "$priv_validator_key_json" \
 			--arg comet_address "$comet_address" \
 			--arg comet_pubkey "$comet_pubkey" \
 			--arg eth_beacon_pubkey "$eth_beacon_pubkey" \
+			--arg node_id "$node_id" \
 			--argjson premined_deposit "$premined_deposit_json" \
 			--arg deposit_amount "$deposit_amount" \
 			--arg jwt "$jwt_value" \
@@ -1332,6 +1344,7 @@ generate_beacond_keys() {
               comet_address: $comet_address,
               comet_pubkey: $comet_pubkey,
               eth_beacon_pubkey: $eth_beacon_pubkey,
+              node_id: $node_id,
               premined_deposit: $premined_deposit,
               deposit_amount: $deposit_amount,
               jwt: $jwt
@@ -1377,7 +1390,6 @@ generate_beacond_keys() {
 	#         return 1
 	#     fi
 	#   fi
-
 }
 
 # =============================================================================
@@ -1426,11 +1438,11 @@ generate_genesis_file() {
 		--chain-spec)
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
-				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
-				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
-				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				shift 2
@@ -1512,7 +1524,7 @@ generate_genesis_file() {
 		log_info "Genesis file already exists at ${genesis_file}"
 	else
 		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 			return 1
@@ -1577,6 +1589,7 @@ generate_beacond_genesis() {
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id=""
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 	local beranode_config_file=""
 
 	# Parse flags
@@ -1592,10 +1605,13 @@ generate_beacond_genesis() {
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
 				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
 				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id_beacond="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
 				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id_beacond="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				shift 2
@@ -1691,7 +1707,7 @@ generate_beacond_genesis() {
 	fi
 
 	# beacond init
-	${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+	${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 	if [[ $? -ne 0 ]]; then
 		log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 		return 1
@@ -1912,154 +1928,4 @@ EOF
 	else
 		log_success "Ensured removal of beacond directory at ${config_dir}/tmp/beacond"
 	fi
-}
-
-# =============================================================================
-# [5] CREATE VALIDATOR NODE CONFIGURATION
-# =============================================================================
-# Configures a complete validator node with both execution and consensus layer
-# components. This function sets up directory structures, configuration files,
-# and network parameters for a running validator.
-#
-# Components Configured:
-#   - Beacond (Consensus Layer):
-#     * app.toml: Application configuration (RPC, JWT, KZG, fee recipient)
-#     * config.toml: CometBFT configuration (P2P, RPC ports, timeouts)
-#     * Validator keys and genesis files
-#
-#   - Bera-Reth (Execution Layer):
-#     * Genesis initialization
-#     * Engine API configuration
-#     * Network ports and discovery
-#
-# Parameters (positional):
-#   $1  beranodes_dir        : Base beranodes directory
-#   $2  local_dir            : Individual node directory
-#   $3  moniker              : Node identifier
-#   $4  network              : Network name (devnet/testnet/mainnet)
-#   $5  wallet_address       : Fee recipient address
-#   $6  wallet_balance       : Initial wallet balance
-#   $7  bin_beacond          : Path to beacond binary
-#   $8  bin_bera_reth        : Path to bera-reth binary
-#   $9  kzg_file             : KZG trusted setup file
-#   $10 ethrpc_port          : Consensus RPC port
-#   $11 ethp2p_port          : Consensus P2P port
-#   $12 ethproxy_port        : ABCI proxy port
-#   $14 el_ethrpc_port       : Execution RPC port
-#   $15 el_authrpc_port      : Engine API authenticated RPC port
-#   $16 el_eth_port          : Execution P2P port
-#   $17 el_prometheus_port   : Execution metrics port
-#   $18 cl_prometheus_port   : Consensus metrics port
-#
-# Note: Much of this function is currently commented out, indicating it may
-# be under refactoring or deprecated in favor of the dispatcher-based
-# node management in v0.2.1.
-#
-# Usage:
-#   create_validator_node <beranodes_dir> <local_dir> <moniker> ...
-# =============================================================================
-create_validator_node() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: create_validator_node" >&2
-	local beranodes_dir="$1"
-	local local_dir="$2"
-	local moniker="$3"
-	local network="$4"
-	local wallet_address="$5"
-	local wallet_balance="$6"
-	local bin_beacond="$7"
-	local bin_bera_reth="$8"
-	local kzg_file="$9"
-	local ethrpc_port="$10"
-	local ethp2p_port="$11"
-	local ethproxy_port="$12"
-	local el_ethrpc_port="$14"
-	local el_authrpc_port="$15"
-	local el_eth_port="$16"
-	local el_prometheus_port="$17"
-	local cl_prometheus_port="$18"
-	local sed_opt=(-i)
-
-	# Ensure the tmp directory exists
-	mkdir -p "${local_dir}/beacond"
-	mkdir -p "${local_dir}/beacond/config"
-	mkdir -p "${local_dir}/bera-reth"
-
-	# Copy the kzg-trusted-setup.json file to the beacond config directory
-	cp ${kzg_file} ${local_dir}/beacond/config/kzg-trusted-setup.json
-	if [[ $? -ne 0 ]]; then
-		log_error "Failed to copy kzg-trusted-setup.json to ${local_dir}/beacond/config/kzg-trusted-setup.json"
-		return 1
-	fi
-	log_success "Copied kzg-trusted-setup.json to ${local_dir}/beacond/config/kzg-trusted-setup.json"
-
-	# # Generate eth-genesis.json file
-	# if [[ -f "${beranodes_dir}/tmp/eth-genesis.json" ]]; then
-	#     log_success "Found eth-genesis.json at ${beranodes_dir}/tmp/eth-genesis.json"
-	# else
-	#     log_warn "eth-genesis.json not found at ${beranodes_dir}/tmp/eth-genesis.json creating it..."
-
-	#     # Generates a eth-genesis.json file that is shared with all nodes
-	#     generate_eth_genesis_file \
-	#       --genesis-file-path "${beranodes_dir}/tmp/eth-genesis.json" \
-	#       --local-dir "${local_dir}" \
-	#       --chain-id "${CHAIN_ID_DEVNET}" \
-	#       --prague1-time ${ETH_GENESIS_PRAGUE1_TIME} \
-	#       --prague1-base-fee-change-denominator ${ETH_GENESIS_PRAGUE1_BASE_FEE_CHANGE_DENOMINATOR} \
-	#       --prague1-min-base-fee ${ETH_GENESIS_PRAGUE1_MIN_BASE_FEE} \
-	#       --prague1-pol-distributor ${ETH_GENESIS_PRAGUE1_POL_DISTRIBUTOR} \
-	#       --prague2-time ${ETH_GENESIS_PRAGUE2_TIME} \
-	#       --prague2-min-base-fee ${ETH_GENESIS_PRAGUE2_MIN_BASE_FEE} \
-	#       --prague3-time ${ETH_GENESIS_PRAGUE3_TIME} \
-	#       --prague3-bex-vault ${ETH_GENESIS_PRAGUE3_BEX_VAULT} \
-	#       --prague3-rescue-address ${ETH_GENESIS_PRAGUE3_RESCUE_ADDRESS} \
-	#       --prague3-blocked-addresses ${ETH_GENESIS_PRAGUE3_BLOCKED_ADDRESSES} \
-	#       --prague4-time ${ETH_GENESIS_PRAGUE4_TIME} \
-	#       --eth-genesis-custom0-contract-address ${wallet_address} \
-	#       --eth-genesis-custom0-contract-balance ${wallet_balance}
-	# fi
-
-	# # Initialize the beacond node
-	# ${bin_beacond} init --chain-id ${CHAIN_ID_DEVNET} --beacon-kit.chain-spec $CHAIN_NAME_DEVNET --moniker ${moniker} --home ${local_dir}/beacond
-	# if [[ $? -ne 0 ]]; then
-	#     log_error "Failed to initialize beacond node"
-	#     return 1
-	# fi
-	# log_success "Initialized beacond node"
-
-	# # Check if the validator key file exists
-	# CHECK_FILE_VALIDATOR_KEY=${local_dir}/beacond/config/priv_validator_key.json
-	# if [ ! -f "$CHECK_FILE_VALIDATOR_KEY" ]; then
-	#     log_error "Error: Private validator key was not created at $CHECK_FILE_VALIDATOR_KEY"
-	#     return 1
-	# fi
-	# log_success "Private validator key generated in $CHECK_FILE_VALIDATOR_KEY"
-
-	# ${bin_beacond} jwt generate -o ${local_dir}/beacond/config/jwt.hex
-	# CHECK_FILE_JWT_SECRET=${local_dir}/beacond/config/jwt.hex
-	# if [ ! -f "$CHECK_FILE_JWT_SECRET" ]; then
-	#     log_error "Error: JWT file was not created at $CHECK_FILE_JWT_SECRET"
-	#     return 1
-	# fi
-	# log_success "JWT secret generated in $CHECK_FILE_JWT_SECRET"
-
-	# ${bin_beacond} genesis add-premined-deposit $GENESIS_DEPOSIT_AMOUNT $wallet_address --beacon-kit.chain-spec $network --home ${local_dir}/beacond
-	# ${bin_beacond} genesis collect-premined-deposits --beacon-kit.chain-spec $network --home ${local_dir}/beacond
-
-	# if [[ $(uname) == "Darwin" ]]; then
-	#     sed_opt=(-i '');
-	# fi
-
-	# sed "${SED_OPT[@]}" 's|chain-spec = ".*"|chain-spec = "'$network'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^rpc-dial-url = ".*"|rpc-dial-url = "http://localhost:'$EL_AUTHRPC_PORT'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^jwt-secret-path = ".*"|jwt-secret-path = "'$CHECK_FILE_JWT_SECRET'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^trusted-setup-path = ".*"|trusted-setup-path = "'$local_dir/beacond/config/kzg-trusted-setup.json'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^suggested-fee-recipient = ".*"|suggested-fee-recipient = "'$wallet_address'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^moniker = ".*"|moniker = "'$moniker'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^laddr = ".*26657"|laddr = "tcp://127.0.0.1:'$ethrpc_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^laddr = ".*26656"|laddr = "tcp://0.0.0.0:'$ethp2p_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^external_address = ".*"|external_address = "'$MY_IP:$ethp2p_port'"|' "$BEACOND_CONFIG/config.toml"
-	# sed "${SED_OPT[@]}" 's|^proxy_app = ".*26658"|proxy_app = "tcp://127.0.0.1:'$ethproxy_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^prometheus_listen_addr = ".*"|prometheus_listen_addr = "':$cl_prometheus_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^prometheus_listen_addr = ".*"|prometheus_listen_addr = "':$el_prometheus_port'"|' "${local_dir}/beacond/config/config.toml"
-	# log_success "Config files in ${local_dir}/beacond/config updated"
 }

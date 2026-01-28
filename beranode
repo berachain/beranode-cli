@@ -20,7 +20,7 @@ set -e
 # Source: lib/constants.sh
 # =============================================================================
 
-BERANODE_VERSION="0.3.0"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.4.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
@@ -82,12 +82,14 @@ readonly DEFAULT_CL_ETHRPC_PORT=26657
 readonly DEFAULT_CL_ETHP2P_PORT=26656
 readonly DEFAULT_CL_ETHPROXY_PORT=26658
 readonly DEFAULT_EL_ETHRPC_PORT=8545
+readonly DEFAULT_EL_WS_PORT=8546
 readonly DEFAULT_EL_AUTHRPC_PORT=8551
 readonly DEFAULT_DEFAULT_EL_ETH_PORT=30303
 readonly DEFAULT_EL_PROMETHEUS_PORT=9101
-readonly DEFAULT_CL_PROMETHEUS_PORT=9102
+readonly DEFAULT_CL_PROMETHEUS_PORT=26660
 readonly DEFAULT_PORT_INCREMENT=100
 readonly DEFAULT_WALLET_BALANCE=1000000000000000000000000000
+readonly DEFAULT_BEACON_NODE_API_PORT=3500
 
 # =============================================================================
 # Binary Names
@@ -103,8 +105,9 @@ readonly BIN_BERARETH="bera-reth"
 readonly BERANODES_PATH_DEFAULT="$(pwd)/beranodes"
 readonly BERANODES_PATH_BIN="/bin"
 readonly BERANODES_PATH_TMP="/tmp"
-readonly BERANODES_PATH_LOG="/log"
+readonly BERANODES_PATH_LOGS="/logs"
 readonly BERANODES_PATH_NODES="/nodes"
+readonly BERANODES_PATH_RUNS="/runs"
 
 readonly SUPPORTED_CAST_VERSION="1.4.3"
 BERANODES_PATH=${BERANODES_PATH:-$(pwd)/beranodes}
@@ -640,6 +643,52 @@ generate_random_name() {
 	echo "${first}-${second}-${third}"
 }
 
+# Removes all occurrences of a given string from a Bash array.
+# Usage:
+#   filtered_array=($(array_exclude_element seeds[@] "hello"))
+# Parameters:
+#   $1 - Name of the array variable (passed as "${array[@]}")
+#   $2 - String value to exclude
+# Returns:
+#   Prints array elements (space-separated), excluding the specified value.
+array_exclude_element() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: array_exclude_element" >&2
+
+	local -a input_array
+	local exclude_value
+	local -a result=()
+
+	# Read input: first arg is (name of) array by reference, second is value to exclude$1
+	input_array=("${!1}")
+	exclude_value="$2"
+
+	for item in "${input_array[@]}"; do
+		if [[ "$item" != "$exclude_value" ]]; then
+			result+=("$item")
+		fi
+	done
+
+	# Return new array (as array, not as string)
+	echo "${result[@]}"
+}
+
+format_csv_as_string() {
+	local origins="$1"
+	local result=""
+	IFS=',' read -ra origins_array <<<"$origins"
+	for origin in "${origins_array[@]}"; do
+		origin_trimmed="$(echo "$origin" | xargs)"
+		if [ -n "$origin_trimmed" ]; then
+			if [ -z "$result" ]; then
+				result="\"$origin_trimmed\""
+			else
+				result="$result,\"$origin_trimmed\""
+			fi
+		fi
+	done
+	echo "$result"
+}
+
 ################################################################################
 # 2. EVM KEY OPERATIONS
 ################################################################################
@@ -890,7 +939,7 @@ validate_integer() {
 validate_port() {
 	local value="$1"
 	if [[ "$value" =~ ^[0-9]+$ ]]; then
-		(( value > 0 && value <= 65535 ))
+		((value > 0 && value <= 65535))
 	else
 		return 1
 	fi
@@ -1086,61 +1135,69 @@ validate_config_field() {
 	local value="$2"
 
 	case "$field" in
-		# Empty strings or simple strings allowed for optional fields (check first!)
-		*_keyring_default_keyname|*_graffiti|*_cors_*|*_wal_dir|*_external_address|*_seeds|*_persistent_peers|*_global_labels|*_metrics_sink|*_statsd_addr|*_chain_spec_file|*_priv_validator_laddr|*_tls_*_file|*_pprof_laddr|*_grpc_*_laddr|*_unconditional_peer_ids|*_private_peer_ids|*_rpc_servers|*_trust_hash|*_temp_dir|*_psql_conn|*_grpc_address)
-			return 0 ;;
+	# Empty strings or simple strings allowed for optional fields (check first!)
+	*_keyring_default_keyname | *_graffiti | *_cors_* | *_wal_dir | *_external_address | *_seeds | *_persistent_peers | *_global_labels | *_metrics_sink | *_statsd_addr | *_chain_spec_file | *_priv_validator_laddr | *_tls_*_file | *_pprof_laddr | *_grpc_*_laddr | *_unconditional_peer_ids | *_private_peer_ids | *_rpc_servers | *_trust_hash | *_temp_dir | *_psql_conn | *_grpc_address)
+		return 0
+		;;
 
-		# Boolean fields (must be specific!)
-		skip_genesis|force|*_enabled|*_strict|*_unsafe|*_close_on_slow_client|*_keep_invalid_txs_in_cache|*_inter_block_cache|*_cache|*_broadcast|*_recheck|*_pex|*_seed_mode|*_disable_fastnode|*_addr_book_strict|*_allow_duplicate_ip|*_logging|apptoml_telemetry_enabled|apptoml_telemetry_enable_hostname|apptoml_telemetry_enable_hostname_label|apptoml_telemetry_enable_service_label|*_skip_timeout_commit|*_create_empty_blocks|*_discard_abci_responses|*_compact|configtoml_instrumentation_prometheus|configtoml_statesync_enable|configtoml_rpc_unsafe|configtoml_filter_peers|*_pruning_*_enabled|*_service_enabled)
-			validate_boolean "$value" ;;
+	# Boolean fields (must be specific!)
+	skip_genesis | force | *_enabled | *_strict | *_unsafe | *_close_on_slow_client | *_keep_invalid_txs_in_cache | *_inter_block_cache | *_cache | *_broadcast | *_recheck | *_pex | *_seed_mode | *_disable_fastnode | *_addr_book_strict | *_allow_duplicate_ip | *_logging | apptoml_telemetry_enabled | apptoml_telemetry_enable_hostname | apptoml_telemetry_enable_hostname_label | apptoml_telemetry_enable_service_label | *_skip_timeout_commit | *_create_empty_blocks | *_discard_abci_responses | *_compact | configtoml_instrumentation_prometheus | configtoml_statesync_enable | configtoml_rpc_unsafe | configtoml_filter_peers | *_pruning_*_enabled | *_service_enabled)
+		validate_boolean "$value"
+		;;
 
-		# Top-level fields
-		moniker|configtoml_moniker) validate_moniker "$value" ;;
-		network|apptoml_beacon_kit_chain_spec) validate_network "$value" ;;
-		validators|full_nodes|pruned_nodes|total_nodes) validate_integer "$value" ;;
-		beranode_dir|genesis_file|genesis_eth_file|*_path|*_file|*_dir) validate_path "$value" ;;
-		mode) validate_mode "$value" ;;
-		wallet_private_key) validate_hex_private_key "$value" ;;
-		wallet_address)
-			[[ -z "$value" ]] || validate_hex_address "$value" ;;
-		wallet_balance|deposit_amount) validate_hex_string "$value" || validate_integer "$value" ;;
-		validator_root) validate_hex_string "$value" ;;
-		*_suggested_fee_recipient) validate_hex_address "$value" ;;
+	# Top-level fields
+	moniker | configtoml_moniker) validate_moniker "$value" ;;
+	network | apptoml_beacon_kit_chain_spec) validate_network "$value" ;;
+	validators | full_nodes | pruned_nodes | total_nodes) validate_integer "$value" ;;
+	beranode_dir | genesis_file | genesis_eth_file | *_path | *_file | *_dir) validate_path "$value" ;;
+	mode) validate_mode "$value" ;;
+	wallet_private_key) validate_hex_private_key "$value" ;;
+	wallet_address)
+		[[ -z "$value" ]] || validate_hex_address "$value"
+		;;
+	wallet_balance | deposit_amount) validate_hex_string "$value" || validate_integer "$value" ;;
+	validator_root) validate_hex_string "$value" ;;
+	*_suggested_fee_recipient) validate_hex_address "$value" ;;
 
-		# Port fields (more specific than _address patterns)
-		*_port|*ethrpc_port|*ethp2p_port|*ethproxy_port|*authrpc_port|*eth_port|*prometheus_port)
-			validate_port "$value" ;;
+	# Port fields (more specific than _address patterns)
+	*_port | *ethrpc_port | *ethp2p_port | *ethproxy_port | *authrpc_port | *eth_port | *prometheus_port)
+		validate_port "$value"
+		;;
 
-		# URL/Address fields (allow PORT_DEFINED_BY_NODE placeholder)
-		*_dial_url|*_laddr|*_address)
-			[[ "$value" =~ \<PORT_DEFINED_BY_NODE\> ]] || [[ -z "$value" ]] || validate_url "$value" || [[ "$value" =~ ^[0-9.:] ]] || return 0 ;;
+	# URL/Address fields (allow PORT_DEFINED_BY_NODE placeholder)
+	*_dial_url | *_laddr | *_address)
+		[[ "$value" =~ \<PORT_DEFINED_BY_NODE\> ]] || [[ -z "$value" ]] || validate_url "$value" || [[ "$value" =~ ^[0-9.:] ]] || return 0
+		;;
 
-		# Duration fields (specific timeout/interval/period patterns)
-		*_timeout|*_period|apptoml_beacon_kit_shutdown_timeout|apptoml_beacon_kit_engine_rpc_*|apptoml_beacon_kit_payload_builder_payload_timeout|configtoml_p2p_persistent_peers_max_dial_period|configtoml_p2p_flush_throttle_timeout|configtoml_p2p_handshake_timeout|configtoml_p2p_dial_timeout|configtoml_mempool_recheck_timeout|configtoml_statesync_trust_period|configtoml_statesync_discovery_time|configtoml_statesync_chunk_request_timeout|configtoml_consensus_timeout_*|configtoml_consensus_peer_*_duration|configtoml_storage_pruning_interval)
-			validate_duration "$value" ;;
+	# Duration fields (specific timeout/interval/period patterns)
+	*_timeout | *_period | apptoml_beacon_kit_shutdown_timeout | apptoml_beacon_kit_engine_rpc_* | apptoml_beacon_kit_payload_builder_payload_timeout | configtoml_p2p_persistent_peers_max_dial_period | configtoml_p2p_flush_throttle_timeout | configtoml_p2p_handshake_timeout | configtoml_p2p_dial_timeout | configtoml_mempool_recheck_timeout | configtoml_statesync_trust_period | configtoml_statesync_discovery_time | configtoml_statesync_chunk_request_timeout | configtoml_consensus_timeout_* | configtoml_consensus_peer_*_duration | configtoml_storage_pruning_interval)
+		validate_duration "$value"
+		;;
 
-		# Integer interval/window fields (after duration patterns)
-		configtoml_storage_compaction_interval|apptoml_pruning_interval|*_pruning_keep_recent|*_availability_window)
-			validate_integer "$value" ;;
+	# Integer interval/window fields (after duration patterns)
+	configtoml_storage_compaction_interval | apptoml_pruning_interval | *_pruning_keep_recent | *_availability_window)
+		validate_integer "$value"
+		;;
 
-		# Chain ID
-		*chain_id) validate_string "$value" ;;
+	# Chain ID
+	*chain_id) validate_string "$value" ;;
 
-		# Integer configuration values
-		*_height|*_retain_*|*_max_*|*_keep_*|apptoml_halt_*|apptoml_min_*|apptoml_iavl_cache_size|apptoml_telemetry_prometheus_retention_time|configtoml_*_buffer_size|configtoml_*_batch_size|configtoml_*_body_bytes|configtoml_*_header_bytes|configtoml_mempool_size|configtoml_mempool_max_tx_bytes|configtoml_mempool_max_txs_bytes|configtoml_mempool_cache_size|configtoml_mempool_experimental_*|configtoml_storage_compaction_interval|configtoml_*_send_rate|configtoml_*_recv_rate|configtoml_*_num_*_peers|configtoml_*_packet_*|configtoml_instrumentation_max_open_connections|configtoml_statesync_trust_height|configtoml_statesync_chunk_fetchers|configtoml_consensus_double_sign_check_height|configtoml_*_pruning_*_retain_height)
-			validate_integer "$value" ;;
+	# Integer configuration values
+	*_height | *_retain_* | *_max_* | *_keep_* | apptoml_halt_* | apptoml_min_* | apptoml_iavl_cache_size | apptoml_telemetry_prometheus_retention_time | configtoml_*_buffer_size | configtoml_*_batch_size | configtoml_*_body_bytes | configtoml_*_header_bytes | configtoml_mempool_size | configtoml_mempool_max_tx_bytes | configtoml_mempool_max_txs_bytes | configtoml_mempool_cache_size | configtoml_mempool_experimental_* | configtoml_storage_compaction_interval | configtoml_*_send_rate | configtoml_*_recv_rate | configtoml_*_num_*_peers | configtoml_*_packet_* | configtoml_instrumentation_max_open_connections | configtoml_statesync_trust_height | configtoml_statesync_chunk_fetchers | configtoml_consensus_double_sign_check_height | configtoml_*_pruning_*_retain_height)
+		validate_integer "$value"
+		;;
 
-		# Backend/type/implementation strings
-		*_backend|*_db_backend|*_type|*_implementation|*_indexer|*_abci) validate_string "$value" ;;
+	# Backend/type/implementation strings
+	*_backend | *_db_backend | *_type | *_implementation | *_indexer | *_abci) validate_string "$value" ;;
 
-		# Versions
-		*_version) validate_string "$value" ;;
+	# Versions
+	*_version) validate_string "$value" ;;
 
-		# Log levels, formats, styles, names, hostnames
-		*_log_level|*_log_format|*_style|*_output|*_time_format|*_service_name|apptoml_telemetry_datadog_hostname|*_namespace|*_experimental_db_key_layout) validate_string "$value" ;;
+	# Log levels, formats, styles, names, hostnames
+	*_log_level | *_log_format | *_style | *_output | *_time_format | *_service_name | apptoml_telemetry_datadog_hostname | *_namespace | *_experimental_db_key_layout) validate_string "$value" ;;
 
-		# Default: non-empty string
-		*) validate_string "$value" ;;
+	# Default: non-empty string
+	*) validate_string "$value" ;;
 	esac
 }
 
@@ -1179,11 +1236,11 @@ validate_beranodes_config() {
 			echo "  ✗ Field '$field' failed validation: '$value'" >&2
 			((validation_errors++))
 		fi
-	done <<< "$fields"
+	done <<<"$fields"
 
 	# Validate nodes array
 	local nodes_count=$(jq '.nodes | length' "$config_file")
-	for ((i=0; i<nodes_count; i++)); do
+	for ((i = 0; i < nodes_count; i++)); do
 		local node=$(jq ".nodes[$i]" "$config_file")
 		if ! validate_node_object "$node"; then
 			echo "  ✗ Node $i validation failed: $VALIDATION_ERROR" >&2
@@ -1193,7 +1250,7 @@ validate_beranodes_config() {
 
 	# Validate genesis_deposits array
 	local deposits_count=$(jq '.genesis_deposits | length' "$config_file")
-	for ((i=0; i<deposits_count; i++)); do
+	for ((i = 0; i < deposits_count; i++)); do
 		local deposit=$(jq ".genesis_deposits[$i]" "$config_file")
 		if ! validate_deposit_object "$deposit"; then
 			echo "  ✗ Genesis deposit $i validation failed: $VALIDATION_ERROR" >&2
@@ -1260,7 +1317,8 @@ generate_eth_genesis_file() {
 	#   - 80094: Berachain mainnet
 	# -------------------------------------------------------------------------
 	local genesis_file_path=""
-	local chain_id="80087" # Default: Berachain devnet chain ID
+	local chain_id="$CHAIN_ID_DEVNET" # Default: Berachain devnet chain ID
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 
 	# -------------------------------------------------------------------------
 	# Section 1.2: Ethereum Hard Fork Activation Blocks
@@ -2352,6 +2410,7 @@ generate_beacond_keys() {
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id="$3"
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -2365,10 +2424,13 @@ generate_beacond_keys() {
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
 				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
 				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id_beacond="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
 				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id_beacond="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				return 1
@@ -2422,13 +2484,13 @@ generate_beacond_keys() {
 	fi
 
 	echo "Initializing beacond nodes..."
-	for i in $(seq 1 ${nodes_count}); do
-		node_json=$(echo "$nodes_json" | jq ".[$i-1]")
+	for ((i = 0; i < nodes_count; i++)); do
+		node_json=$(echo "$nodes_json" | jq ".[$i]")
 		local moniker=$(echo "$node_json" | jq -r '.moniker')
 		local role=$(echo "$node_json" | jq -r '.role')
 
 		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 			return 1
@@ -2464,6 +2526,12 @@ generate_beacond_keys() {
 		validator_keys="$(${beacond_binary} deposit validator-keys --home ${config_dir}/tmp/beacond)"
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to read validator keys at ${config_dir}/tmp/beacond"
+			return 1
+		fi
+
+		node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+		if [[ $? -ne 0 ]]; then
+			log_error "Failed to read node id at ${config_dir}/tmp/beacond"
 			return 1
 		fi
 
@@ -2515,12 +2583,13 @@ generate_beacond_keys() {
 
 		# Build json object with the validator keys
 		tmp_beranode_config="${beranode_config_file}.tmp"
-		jq --arg idx "$((i - 1))" \
+		jq --arg idx "$((i))" \
 			--argjson node_key "$node_key_json" \
 			--argjson priv_validator_key "$priv_validator_key_json" \
 			--arg comet_address "$comet_address" \
 			--arg comet_pubkey "$comet_pubkey" \
 			--arg eth_beacon_pubkey "$eth_beacon_pubkey" \
+			--arg node_id "$node_id" \
 			--argjson premined_deposit "$premined_deposit_json" \
 			--arg deposit_amount "$deposit_amount" \
 			--arg jwt "$jwt_value" \
@@ -2532,6 +2601,7 @@ generate_beacond_keys() {
               comet_address: $comet_address,
               comet_pubkey: $comet_pubkey,
               eth_beacon_pubkey: $eth_beacon_pubkey,
+              node_id: $node_id,
               premined_deposit: $premined_deposit,
               deposit_amount: $deposit_amount,
               jwt: $jwt
@@ -2577,7 +2647,6 @@ generate_beacond_keys() {
 	#         return 1
 	#     fi
 	#   fi
-
 }
 
 # =============================================================================
@@ -2626,11 +2695,11 @@ generate_genesis_file() {
 		--chain-spec)
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
-				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
-				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
-				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				shift 2
@@ -2712,7 +2781,7 @@ generate_genesis_file() {
 		log_info "Genesis file already exists at ${genesis_file}"
 	else
 		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 			return 1
@@ -2777,6 +2846,7 @@ generate_beacond_genesis() {
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id=""
+	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 	local beranode_config_file=""
 
 	# Parse flags
@@ -2792,10 +2862,13 @@ generate_beacond_genesis() {
 			chain_spec="$2"
 			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
 				chain_id="${CHAIN_ID_DEVNET}"
+				chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
 				chain_id="${CHAIN_ID_TESTNET}"
+				chain_id_beacond="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
 			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
 				chain_id="${CHAIN_ID_MAINNET}"
+				chain_id_beacond="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
 			else
 				echo "Unknown chain spec: ${chain_spec}"
 				shift 2
@@ -2891,7 +2964,7 @@ generate_beacond_genesis() {
 	fi
 
 	# beacond init
-	${beacond_binary} init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+	${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 	if [[ $? -ne 0 ]]; then
 		log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 		return 1
@@ -3114,156 +3187,6 @@ EOF
 	fi
 }
 
-# =============================================================================
-# [5] CREATE VALIDATOR NODE CONFIGURATION
-# =============================================================================
-# Configures a complete validator node with both execution and consensus layer
-# components. This function sets up directory structures, configuration files,
-# and network parameters for a running validator.
-#
-# Components Configured:
-#   - Beacond (Consensus Layer):
-#     * app.toml: Application configuration (RPC, JWT, KZG, fee recipient)
-#     * config.toml: CometBFT configuration (P2P, RPC ports, timeouts)
-#     * Validator keys and genesis files
-#
-#   - Bera-Reth (Execution Layer):
-#     * Genesis initialization
-#     * Engine API configuration
-#     * Network ports and discovery
-#
-# Parameters (positional):
-#   $1  beranodes_dir        : Base beranodes directory
-#   $2  local_dir            : Individual node directory
-#   $3  moniker              : Node identifier
-#   $4  network              : Network name (devnet/testnet/mainnet)
-#   $5  wallet_address       : Fee recipient address
-#   $6  wallet_balance       : Initial wallet balance
-#   $7  bin_beacond          : Path to beacond binary
-#   $8  bin_bera_reth        : Path to bera-reth binary
-#   $9  kzg_file             : KZG trusted setup file
-#   $10 ethrpc_port          : Consensus RPC port
-#   $11 ethp2p_port          : Consensus P2P port
-#   $12 ethproxy_port        : ABCI proxy port
-#   $14 el_ethrpc_port       : Execution RPC port
-#   $15 el_authrpc_port      : Engine API authenticated RPC port
-#   $16 el_eth_port          : Execution P2P port
-#   $17 el_prometheus_port   : Execution metrics port
-#   $18 cl_prometheus_port   : Consensus metrics port
-#
-# Note: Much of this function is currently commented out, indicating it may
-# be under refactoring or deprecated in favor of the dispatcher-based
-# node management in v0.2.1.
-#
-# Usage:
-#   create_validator_node <beranodes_dir> <local_dir> <moniker> ...
-# =============================================================================
-create_validator_node() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: create_validator_node" >&2
-	local beranodes_dir="$1"
-	local local_dir="$2"
-	local moniker="$3"
-	local network="$4"
-	local wallet_address="$5"
-	local wallet_balance="$6"
-	local bin_beacond="$7"
-	local bin_bera_reth="$8"
-	local kzg_file="$9"
-	local ethrpc_port="$10"
-	local ethp2p_port="$11"
-	local ethproxy_port="$12"
-	local el_ethrpc_port="$14"
-	local el_authrpc_port="$15"
-	local el_eth_port="$16"
-	local el_prometheus_port="$17"
-	local cl_prometheus_port="$18"
-	local sed_opt=(-i)
-
-	# Ensure the tmp directory exists
-	mkdir -p "${local_dir}/beacond"
-	mkdir -p "${local_dir}/beacond/config"
-	mkdir -p "${local_dir}/bera-reth"
-
-	# Copy the kzg-trusted-setup.json file to the beacond config directory
-	cp ${kzg_file} ${local_dir}/beacond/config/kzg-trusted-setup.json
-	if [[ $? -ne 0 ]]; then
-		log_error "Failed to copy kzg-trusted-setup.json to ${local_dir}/beacond/config/kzg-trusted-setup.json"
-		return 1
-	fi
-	log_success "Copied kzg-trusted-setup.json to ${local_dir}/beacond/config/kzg-trusted-setup.json"
-
-	# # Generate eth-genesis.json file
-	# if [[ -f "${beranodes_dir}/tmp/eth-genesis.json" ]]; then
-	#     log_success "Found eth-genesis.json at ${beranodes_dir}/tmp/eth-genesis.json"
-	# else
-	#     log_warn "eth-genesis.json not found at ${beranodes_dir}/tmp/eth-genesis.json creating it..."
-
-	#     # Generates a eth-genesis.json file that is shared with all nodes
-	#     generate_eth_genesis_file \
-	#       --genesis-file-path "${beranodes_dir}/tmp/eth-genesis.json" \
-	#       --local-dir "${local_dir}" \
-	#       --chain-id "${CHAIN_ID_DEVNET}" \
-	#       --prague1-time ${ETH_GENESIS_PRAGUE1_TIME} \
-	#       --prague1-base-fee-change-denominator ${ETH_GENESIS_PRAGUE1_BASE_FEE_CHANGE_DENOMINATOR} \
-	#       --prague1-min-base-fee ${ETH_GENESIS_PRAGUE1_MIN_BASE_FEE} \
-	#       --prague1-pol-distributor ${ETH_GENESIS_PRAGUE1_POL_DISTRIBUTOR} \
-	#       --prague2-time ${ETH_GENESIS_PRAGUE2_TIME} \
-	#       --prague2-min-base-fee ${ETH_GENESIS_PRAGUE2_MIN_BASE_FEE} \
-	#       --prague3-time ${ETH_GENESIS_PRAGUE3_TIME} \
-	#       --prague3-bex-vault ${ETH_GENESIS_PRAGUE3_BEX_VAULT} \
-	#       --prague3-rescue-address ${ETH_GENESIS_PRAGUE3_RESCUE_ADDRESS} \
-	#       --prague3-blocked-addresses ${ETH_GENESIS_PRAGUE3_BLOCKED_ADDRESSES} \
-	#       --prague4-time ${ETH_GENESIS_PRAGUE4_TIME} \
-	#       --eth-genesis-custom0-contract-address ${wallet_address} \
-	#       --eth-genesis-custom0-contract-balance ${wallet_balance}
-	# fi
-
-	# # Initialize the beacond node
-	# ${bin_beacond} init --chain-id ${CHAIN_ID_DEVNET} --beacon-kit.chain-spec $CHAIN_NAME_DEVNET --moniker ${moniker} --home ${local_dir}/beacond
-	# if [[ $? -ne 0 ]]; then
-	#     log_error "Failed to initialize beacond node"
-	#     return 1
-	# fi
-	# log_success "Initialized beacond node"
-
-	# # Check if the validator key file exists
-	# CHECK_FILE_VALIDATOR_KEY=${local_dir}/beacond/config/priv_validator_key.json
-	# if [ ! -f "$CHECK_FILE_VALIDATOR_KEY" ]; then
-	#     log_error "Error: Private validator key was not created at $CHECK_FILE_VALIDATOR_KEY"
-	#     return 1
-	# fi
-	# log_success "Private validator key generated in $CHECK_FILE_VALIDATOR_KEY"
-
-	# ${bin_beacond} jwt generate -o ${local_dir}/beacond/config/jwt.hex
-	# CHECK_FILE_JWT_SECRET=${local_dir}/beacond/config/jwt.hex
-	# if [ ! -f "$CHECK_FILE_JWT_SECRET" ]; then
-	#     log_error "Error: JWT file was not created at $CHECK_FILE_JWT_SECRET"
-	#     return 1
-	# fi
-	# log_success "JWT secret generated in $CHECK_FILE_JWT_SECRET"
-
-	# ${bin_beacond} genesis add-premined-deposit $GENESIS_DEPOSIT_AMOUNT $wallet_address --beacon-kit.chain-spec $network --home ${local_dir}/beacond
-	# ${bin_beacond} genesis collect-premined-deposits --beacon-kit.chain-spec $network --home ${local_dir}/beacond
-
-	# if [[ $(uname) == "Darwin" ]]; then
-	#     sed_opt=(-i '');
-	# fi
-
-	# sed "${SED_OPT[@]}" 's|chain-spec = ".*"|chain-spec = "'$network'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^rpc-dial-url = ".*"|rpc-dial-url = "http://localhost:'$EL_AUTHRPC_PORT'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^jwt-secret-path = ".*"|jwt-secret-path = "'$CHECK_FILE_JWT_SECRET'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^trusted-setup-path = ".*"|trusted-setup-path = "'$local_dir/beacond/config/kzg-trusted-setup.json'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^suggested-fee-recipient = ".*"|suggested-fee-recipient = "'$wallet_address'"|' "${local_dir}/beacond/config/app.toml"
-	# sed "${SED_OPT[@]}" 's|^moniker = ".*"|moniker = "'$moniker'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^laddr = ".*26657"|laddr = "tcp://127.0.0.1:'$ethrpc_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^laddr = ".*26656"|laddr = "tcp://0.0.0.0:'$ethp2p_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^external_address = ".*"|external_address = "'$MY_IP:$ethp2p_port'"|' "$BEACOND_CONFIG/config.toml"
-	# sed "${SED_OPT[@]}" 's|^proxy_app = ".*26658"|proxy_app = "tcp://127.0.0.1:'$ethproxy_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^prometheus_listen_addr = ".*"|prometheus_listen_addr = "':$cl_prometheus_port'"|' "${local_dir}/beacond/config/config.toml"
-	# sed "${SED_OPT[@]}" 's|^prometheus_listen_addr = ".*"|prometheus_listen_addr = "':$el_prometheus_port'"|' "${local_dir}/beacond/config/config.toml"
-	# log_success "Config files in ${local_dir}/beacond/config updated"
-}
-
 
 # =============================================================================
 # node
@@ -3387,7 +3310,7 @@ create_pruned_node() {
 #
 # Side Effects:
 #   - Launches beacond and bera-reth as background processes
-#   - Creates log files in <beranodes_dir>/log/
+#   - Creates log files in <beranodes_dir>/logs/
 #   - Writes process IDs to PID files
 #   - Performs initial health check
 #
@@ -4382,9 +4305,18 @@ cmd_init() {
 	# Config.toml - RPC Server Configuration
 	local configtoml_rpc_laddr="${CONFIGTOML_RPC_LADDR}"
 	local configtoml_rpc_unsafe="${CONFIGTOML_RPC_UNSAFE}"
-	local configtoml_rpc_cors_allowed_origins="${CONFIGTOML_RPC_CORS_ALLOWED_ORIGINS}"
-	local configtoml_rpc_cors_allowed_methods="${CONFIGTOML_RPC_CORS_ALLOWED_METHODS}"
-	local configtoml_rpc_cors_allowed_headers="${CONFIGTOML_RPC_CORS_ALLOWED_HEADERS}"
+	local configtoml_rpc_cors_allowed_origins="$(
+		IFS=,
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_ORIGINS[*]}"
+	)"
+	local configtoml_rpc_cors_allowed_methods="$(
+		IFS=,
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_METHODS[*]}"
+	)"
+	local configtoml_rpc_cors_allowed_headers="$(
+		IFS=,
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_HEADERS[*]}"
+	)"
 	local configtoml_rpc_max_open_connections="${CONFIGTOML_RPC_MAX_OPEN_CONNECTIONS}"
 	local configtoml_rpc_max_subscription_clients="${CONFIGTOML_RPC_MAX_SUBSCRIPTION_CLIENTS}"
 	local configtoml_rpc_max_subscriptions_per_client="${CONFIGTOML_RPC_MAX_SUBSCRIPTIONS_PER_CLIENT}"
@@ -6098,41 +6030,8 @@ cmd_init() {
 	echo "Skip Genesis:    ${skip_genesis:-false}"
 	echo "Force:           ${force:-false}"
 	echo "Mode:            ${mode}"
-	echo ""
-	echo "========= Client Configuration =========="
-	echo "Chain ID:                ${clienttoml_chain_id:-<unset>}"
-	echo "Keyring Backend:         ${clienttoml_keyring_backend:-<unset>}"
-	echo "Keyring Default Keyname: ${clienttoml_keyring_default_keyname:-<unset>}"
-	echo "Output:                  ${clienttoml_output:-<unset>}"
-	echo "Node:                    ${clienttoml_node:-<unset>}"
-	echo "Broadcast Mode:          ${clienttoml_broadcast_mode:-<unset>}"
-	echo "gRPC Address:            ${clienttoml_grpc_address:-<unset>}"
-	echo "gRPC Insecure:           ${clienttoml_grpc_insecure:-<unset>}"
 	echo "=========================================="
 	echo ""
-	echo "========= App.toml Configuration ========"
-	echo "Pruning:                 ${apptoml_pruning:-<unset>}"
-	echo "IAVL Cache Size:         ${apptoml_iavl_cache_size:-<unset>}"
-	echo "App DB Backend:          ${apptoml_app_db_backend:-<unset>}"
-	echo "Telemetry Enabled:       ${apptoml_telemetry_enabled:-<unset>}"
-	echo "Chain Spec:              ${apptoml_beacon_kit_chain_spec:-<unset>}"
-	echo "Engine RPC Dial URL:     ${apptoml_beacon_kit_engine_rpc_dial_url:-<unset>}"
-	echo "JWT Secret Path:         ${apptoml_beacon_kit_engine_jwt_secret_path:-<unset>}"
-	echo "Logger Level:            ${apptoml_beacon_kit_logger_log_level:-<unset>}"
-	echo "Payload Builder Enabled: ${apptoml_beacon_kit_payload_builder_enabled:-<unset>}"
-	echo "Node API Enabled:        ${apptoml_beacon_kit_node_api_enabled:-<unset>}"
-	echo "=========================================="
-	echo ""
-	echo "========= Config.toml Configuration ====="
-	echo "Moniker:                 ${configtoml_moniker:-<unset>}"
-	echo "DB Backend:              ${configtoml_db_backend:-<unset>}"
-	echo "Log Level:               ${configtoml_log_level:-<unset>}"
-	echo "RPC Laddr:               ${configtoml_rpc_laddr:-<unset>}"
-	echo "P2P Laddr:               ${configtoml_p2p_laddr:-<unset>}"
-	echo "Mempool Type:            ${configtoml_mempool_type:-<unset>}"
-	echo "Consensus Timeout:       ${configtoml_consensus_timeout_propose:-<unset>}"
-	echo "Prometheus:              ${configtoml_instrumentation_prometheus:-<unset>}"
-	echo "=========================================="
 
 	# =========================================================================
 	# [5] DIRECTORY STRUCTURE SETUP
@@ -6142,8 +6041,9 @@ cmd_init() {
 	ensure_dir_exists "${BERANODES_PATH}" "beranode directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_BIN}" "beranode binary directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_TMP}" "beranode temporary directory" || return 1
-	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_LOG}" "beranode log directory" || return 1
+	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_LOGS}" "beranode log directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_NODES}" "beranode nodes directory" || return 1
+	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_RUNS}" "beranode runs directory" || return 1
 
 	# =========================================================================
 	# [6] BINARY VERIFICATION
@@ -6250,37 +6150,73 @@ cmd_init() {
 		node_ethp2p_port=${DEFAULT_CL_ETHP2P_PORT}
 		node_ethproxy_port=${DEFAULT_CL_ETHPROXY_PORT}
 		node_el_ethrpc_port=${DEFAULT_EL_ETHRPC_PORT}
+		node_el_ws_port=${DEFAULT_EL_WS_PORT}
 		node_el_authrpc_port=${DEFAULT_EL_AUTHRPC_PORT}
 		node_el_eth_port=${DEFAULT_DEFAULT_EL_ETH_PORT}
 		node_el_prometheus_port=${DEFAULT_EL_PROMETHEUS_PORT}
 		node_cl_prometheus_port=${DEFAULT_CL_PROMETHEUS_PORT}
+		node_beacond_node_port=${DEFAULT_BEACON_NODE_API_PORT}
 		node_port_increment=${DEFAULT_PORT_INCREMENT}
 
 		current_node_ethrpc_port=${node_ethrpc_port}
 		current_node_ethp2p_port=${node_ethp2p_port}
 		current_node_ethproxy_port=${node_ethproxy_port}
 		current_node_el_ethrpc_port=${node_el_ethrpc_port}
+		current_node_el_ws_port=${node_el_ws_port}
 		current_node_el_authrpc_port=${node_el_authrpc_port}
 		current_node_el_eth_port=${node_el_eth_port}
 		current_node_el_prometheus_port=${node_el_prometheus_port}
 		current_node_cl_prometheus_port=${node_cl_prometheus_port}
+		current_node_beacond_node_port=${node_beacond_node_port}
 
 		if [[ ${validators} -gt 0 ]]; then
 			for i in $(seq 1 ${validators}); do
 				if [[ $i -eq ${validators} ]]; then
-					nodes_validators="${nodes_validators}{\"role\": \"validator\", \"moniker\": \"${moniker}-val-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}}"
+					nodes_validators="${nodes_validators}{
+						\"role\": \"validator\",
+						\"moniker\": \"${moniker}-val-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+            \"el_ws_port\": ${current_node_el_ws_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					}"
 				else
-					nodes_validators="${nodes_validators}{\"role\": \"validator\", \"moniker\": \"${moniker}-val-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}},"
+					nodes_validators="${nodes_validators}{
+						\"role\": \"validator\",
+						\"moniker\": \"${moniker}-val-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+            \"el_ws_port\": ${current_node_el_ws_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					},"
 				fi
 
 				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
 				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
 				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
 				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
 				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
 				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
 				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
 				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
+				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
 			done
 		fi
 
@@ -6288,18 +6224,50 @@ cmd_init() {
 		if [[ ${full_nodes} -gt 0 ]]; then
 			for i in $(seq 1 ${full_nodes}); do
 				if [[ $i -eq ${full_nodes} ]]; then
-					nodes_full_nodes="${nodes_full_nodes}{\"role\": \"rpc_full\", \"moniker\": \"${moniker}-rpc-full-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}}"
+					nodes_full_nodes="${nodes_full_nodes}{
+						\"role\": \"rpc_full\",
+						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+            \"el_ws_port\": ${current_node_el_ws_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					}"
 				else
-					nodes_full_nodes="${nodes_full_nodes}{\"role\": \"rpc_full\", \"moniker\": \"${moniker}-rpc-full-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}},"
+					nodes_full_nodes="${nodes_full_nodes}{
+						\"role\": \"rpc_full\",
+						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+            \"el_ws_port\": ${current_node_el_ws_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					},"
 				fi
 				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
 				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
 				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
 				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
 				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
 				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
 				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
 				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
+				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
 			done
 		fi
 
@@ -6307,18 +6275,48 @@ cmd_init() {
 		if [[ ${pruned_nodes} -gt 0 ]]; then
 			for i in $(seq 1 ${pruned_nodes}); do
 				if [[ $i -eq ${pruned_nodes} ]]; then
-					nodes_pruned_nodes="${nodes_pruned_nodes}{\"role\": \"rpc-pruned\", \"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}}"
+					nodes_pruned_nodes="${nodes_pruned_nodes}{
+						\"role\": \"rpc-pruned\",
+						\"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					}"
 				else
-					nodes_pruned_nodes="${nodes_pruned_nodes}{\"role\": \"rpc-pruned\", \"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\", \"network\": \"${network}\", \"wallet_address\": \"${evm_address}\", \"ethrpc_port\": ${current_node_ethrpc_port}, \"ethp2p_port\": ${current_node_ethp2p_port}, \"ethproxy_port\": ${current_node_ethproxy_port}, \"el_ethrpc_port\": ${current_node_el_ethrpc_port}, \"el_authrpc_port\": ${current_node_el_authrpc_port}, \"el_eth_port\": ${current_node_el_eth_port}, \"el_prometheus_port\": ${current_node_el_prometheus_port}, \"cl_prometheus_port\": ${current_node_cl_prometheus_port}},"
+					nodes_pruned_nodes="${nodes_pruned_nodes}{
+						\"role\": \"rpc-pruned\",
+						\"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\",
+						\"network\": \"${network}\",
+						\"wallet_address\": \"${wallet_address}\",
+						\"ethrpc_port\": ${current_node_ethrpc_port},
+						\"ethp2p_port\": ${current_node_ethp2p_port},
+						\"ethproxy_port\": ${current_node_ethproxy_port},
+						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+						\"el_authrpc_port\": ${current_node_el_authrpc_port},
+						\"el_eth_port\": ${current_node_el_eth_port},
+						\"el_prometheus_port\": ${current_node_el_prometheus_port},
+						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
+            \"beacond_node_port\": ${current_node_beacond_node_port}
+					},"
 				fi
 				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
 				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
 				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
 				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
 				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
 				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
 				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
 				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
+				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
 			done
 		fi
 
@@ -6337,55 +6335,186 @@ cmd_init() {
 			fi
 		done
 
-		# jq -n \
-		#   --arg moniker "$moniker" \
-		#   --arg network "$network" \
-		#   --argjson validators "$validators" \
-		#   --argjson full_nodes "$full_nodes" \
-		#   --argjson pruned_nodes "$pruned_nodes" \
-		#   --argjson total_nodes "$total_nodes" \
-		#   --arg beranode_dir "$BERANODES_PATH" \
-		#   --argjson skip_genesis "$skip_genesis" \
-		#   --argjson force "$force" \
-		#   --arg mode "$mode" \
-		#   --arg wallet_private_key "$wallet_private_key" \
-		#   --arg wallet_address "$wallet_address" \
-		#   --arg wallet_balance "$wallet_balance" \
-		#   --argjson nodes "$(echo "[${nodes_combined}]" | jq .)" \
-		#   --arg clienttoml_chain_id "$clienttoml_chain_id" \
-		#   --arg clienttoml_keyring_backend "$clienttoml_keyring_backend" \
-		#   --arg clienttoml_keyring_default_keyname "$clienttoml_keyring_default_keyname" \
-		#   --arg clienttoml_output "$clienttoml_output" \
-		#   --arg clienttoml_node "$clienttoml_node" \
-		#   --arg clienttoml_broadcast_mode "$clienttoml_broadcast_mode" \
-		#   --arg clienttoml_grpc_address "$clienttoml_grpc_address" \
-		#   --arg clienttoml_grpc_insecure "$clienttoml_grpc_insecure" \
-		#   '{
-		#     moniker: $moniker,
-		#     network: $network,
-		#     validators: $validators,
-		#     full_nodes: $full_nodes,
-		#     pruned_nodes: $pruned_nodes,
-		#     total_nodes: $total_nodes,
-		#     beranode_dir: $beranode_dir,
-		#     skip_genesis: $skip_genesis,
-		#     force: $force,
-		#     mode: $mode,
-		#     wallet_private_key: $wallet_private_key,
-		#     wallet_address: $wallet_address,
-		#     wallet_balance: $wallet_balance,
-		#     nodes: $nodes,
-		#     clienttoml_chain_id: $clienttoml_chain_id,
-		#     clienttoml_keyring_backend: $clienttoml_keyring_backend,
-		#     clienttoml_keyring_default_keyname: $clienttoml_keyring_default_keyname,
-		#     clienttoml_output: $clienttoml_output,
-		#     clienttoml_node: $clienttoml_node,
-		#     clienttoml_broadcast_mode: $clienttoml_broadcast_mode,
-		#     clienttoml_grpc_address: $clienttoml_grpc_address,
-		#     clienttoml_grpc_insecure: $clienttoml_grpc_insecure
-		#   }' > "${config_json_path}"
+		# for group in "${all_groups[@]}"; do
+		#   if [[ -n "$group" ]]; then
+		#     # Each group is a comma-separated string of JSON node objects.
+		#     # To safely extract moniker values, iterate through each node object in the string.
+		#     # Remove potential trailing commas and wrap with brackets to form a valid JSON array.
+		#     group_json="[$(echo "$group" | sed 's/,$//')]"
+		#     # Use jq to extract each moniker.
+		#     echo "$group_json" | jq -r '.[].moniker'
+		#   fi
+		# done
+
+		clienttoml="{
+      \"chain_id\": \"${clienttoml_chain_id}\",
+      \"keyring_backend\": \"${clienttoml_keyring_backend}\",
+      \"keyring_default_keyname\": \"${clienttoml_keyring_default_keyname}\",
+      \"output\": \"${clienttoml_output}\",
+      \"node\": \"${clienttoml_node}\",
+      \"broadcast_mode\": \"${clienttoml_broadcast_mode}\",
+      \"grpc_address\": \"${clienttoml_grpc_address}\",
+      \"grpc_insecure\": \"${clienttoml_grpc_insecure}\"
+    }"
+		apptoml="{
+      \"pruning\": \"${apptoml_pruning}\",
+      \"pruning_keep_recent\": \"${apptoml_pruning_keep_recent}\",
+      \"pruning_interval\": \"${apptoml_pruning_interval}\",
+      \"halt_height\": \"${apptoml_halt_height}\",
+      \"halt_time\": \"${apptoml_halt_time}\",
+      \"min_retain_blocks\": \"${apptoml_min_retain_blocks}\",
+      \"inter_block_cache\": \"${apptoml_inter_block_cache}\",
+      \"iavl_cache_size\": \"${apptoml_iavl_cache_size}\",
+      \"iavl_disable_fastnode\": \"${apptoml_iavl_disable_fastnode}\",
+      \"app_db_backend\": \"${apptoml_app_db_backend}\",
+      \"telemetry_service_name\": \"${apptoml_telemetry_service_name}\",
+      \"telemetry_enabled\": \"${apptoml_telemetry_enabled}\",
+      \"telemetry_enable_hostname\": \"${apptoml_telemetry_enable_hostname}\",
+      \"telemetry_enable_hostname_label\": \"${apptoml_telemetry_enable_hostname_label}\",
+      \"telemetry_enable_service_label\": \"${apptoml_telemetry_enable_service_label}\",
+      \"telemetry_prometheus_retention_time\": \"${apptoml_telemetry_prometheus_retention_time}\",
+      \"telemetry_global_labels\": \"${apptoml_telemetry_global_labels}\",
+      \"telemetry_metrics_sink\": \"${apptoml_telemetry_metrics_sink}\",
+      \"telemetry_statsd_addr\": \"${apptoml_telemetry_statsd_addr}\",
+      \"telemetry_datadog_hostname\": \"${apptoml_telemetry_datadog_hostname}\",
+      \"beacon_kit_chain_spec\": \"${apptoml_beacon_kit_chain_spec}\",
+      \"beacon_kit_chain_spec_file\": \"${apptoml_beacon_kit_chain_spec_file}\",
+      \"beacon_kit_shutdown_timeout\": \"${apptoml_beacon_kit_shutdown_timeout}\",
+      \"beacon_kit_engine_rpc_dial_url\": \"${apptoml_beacon_kit_engine_rpc_dial_url}\",
+      \"beacon_kit_engine_rpc_timeout\": \"${apptoml_beacon_kit_engine_rpc_timeout}\",
+      \"beacon_kit_engine_rpc_retry_interval\": \"${apptoml_beacon_kit_engine_rpc_retry_interval}\",
+      \"beacon_kit_engine_rpc_max_retry_interval\": \"${apptoml_beacon_kit_engine_rpc_max_retry_interval}\",
+      \"beacon_kit_engine_rpc_startup_check_interval\": \"${apptoml_beacon_kit_engine_rpc_startup_check_interval}\",
+      \"beacon_kit_engine_rpc_jwt_refresh_interval\": \"${apptoml_beacon_kit_engine_rpc_jwt_refresh_interval}\",
+      \"beacon_kit_engine_jwt_secret_path\": \"${apptoml_beacon_kit_engine_jwt_secret_path}\",
+      \"beacon_kit_logger_time_format\": \"${apptoml_beacon_kit_logger_time_format}\",
+      \"beacon_kit_logger_log_level\": \"${apptoml_beacon_kit_logger_log_level}\",
+      \"beacon_kit_logger_style\": \"${apptoml_beacon_kit_logger_style}\",
+      \"beacon_kit_kzg_trusted_setup_path\": \"${apptoml_beacon_kit_kzg_trusted_setup_path}\",
+      \"beacon_kit_kzg_implementation\": \"${apptoml_beacon_kit_kzg_implementation}\",
+      \"beacon_kit_payload_builder_enabled\": \"${apptoml_beacon_kit_payload_builder_enabled}\",
+      \"beacon_kit_payload_builder_suggested_fee_recipient\": \"${apptoml_beacon_kit_payload_builder_suggested_fee_recipient}\",
+      \"beacon_kit_payload_builder_payload_timeout\": \"${apptoml_beacon_kit_payload_builder_payload_timeout}\",
+      \"beacon_kit_validator_graffiti\": \"${apptoml_beacon_kit_validator_graffiti}\",
+      \"beacon_kit_validator_availability_window\": \"${apptoml_beacon_kit_validator_availability_window}\",
+      \"beacon_kit_node_api_enabled\": \"${apptoml_beacon_kit_node_api_enabled}\",
+      \"beacon_kit_node_api_address\": \"${apptoml_beacon_kit_node_api_address}\",
+      \"beacon_kit_node_api_logging\": \"${apptoml_beacon_kit_node_api_logging}\"
+    }"
+		configtoml="{
+      \"version\": \"${configtoml_version}\",
+      \"proxy_app\": \"${configtoml_proxy_app}\",
+      \"moniker\": \"${configtoml_moniker}\",
+      \"db_backend\": \"${configtoml_db_backend}\",
+      \"db_dir\": \"${configtoml_db_dir}\",
+      \"log_level\": \"${configtoml_log_level}\",
+      \"log_format\": \"${configtoml_log_format}\",
+      \"genesis_file\": \"${configtoml_genesis_file}\",
+      \"priv_validator_key_file\": \"${configtoml_priv_validator_key_file}\",
+      \"priv_validator_state_file\": \"${configtoml_priv_validator_state_file}\",
+      \"priv_validator_laddr\": \"${configtoml_priv_validator_laddr}\",
+      \"node_key_file\": \"${configtoml_node_key_file}\",
+      \"abci\": \"${configtoml_abci}\",
+      \"filter_peers\": \"${configtoml_filter_peers}\",
+      \"rpc_laddr\": \"${configtoml_rpc_laddr}\",
+      \"rpc_unsafe\": \"${configtoml_rpc_unsafe}\",
+      \"rpc_cors_allowed_origins\": \"${configtoml_rpc_cors_allowed_origins}\",
+      \"rpc_cors_allowed_methods\": \"${configtoml_rpc_cors_allowed_methods}\",
+      \"rpc_cors_allowed_headers\": \"${configtoml_rpc_cors_allowed_headers}\",
+      \"rpc_max_open_connections\": \"${configtoml_rpc_max_open_connections}\",
+      \"rpc_max_subscription_clients\": \"${configtoml_rpc_max_subscription_clients}\",
+      \"rpc_max_subscriptions_per_client\": \"${configtoml_rpc_max_subscriptions_per_client}\",
+      \"rpc_experimental_subscription_buffer_size\": \"${configtoml_rpc_experimental_subscription_buffer_size}\",
+      \"rpc_experimental_websocket_write_buffer_size\": \"${configtoml_rpc_experimental_websocket_write_buffer_size}\",
+      \"rpc_experimental_close_on_slow_client\": \"${configtoml_rpc_experimental_close_on_slow_client}\",
+      \"rpc_timeout_broadcast_tx_commit\": \"${configtoml_rpc_timeout_broadcast_tx_commit}\",
+      \"rpc_max_request_batch_size\": \"${configtoml_rpc_max_request_batch_size}\",
+      \"rpc_max_body_bytes\": \"${configtoml_rpc_max_body_bytes}\",
+      \"rpc_max_header_bytes\": \"${configtoml_rpc_max_header_bytes}\",
+      \"rpc_tls_cert_file\": \"${configtoml_rpc_tls_cert_file}\",
+      \"rpc_tls_key_file\": \"${configtoml_rpc_tls_key_file}\",
+      \"rpc_pprof_laddr\": \"${configtoml_rpc_pprof_laddr}\",
+      \"grpc_laddr\": \"${configtoml_grpc_laddr}\",
+      \"grpc_version_service_enabled\": \"${configtoml_grpc_version_service_enabled}\",
+      \"grpc_block_service_enabled\": \"${configtoml_grpc_block_service_enabled}\",
+      \"grpc_block_results_service_enabled\": \"${configtoml_grpc_block_results_service_enabled}\",
+      \"grpc_privileged_laddr\": \"${configtoml_grpc_privileged_laddr}\",
+      \"grpc_privileged_pruning_service_enabled\": \"${configtoml_grpc_privileged_pruning_service_enabled}\",
+      \"p2p_laddr\": \"${configtoml_p2p_laddr}\",
+      \"p2p_external_address\": \"${configtoml_p2p_external_address}\",
+      \"p2p_seeds\": \"${configtoml_p2p_seeds}\",
+      \"p2p_persistent_peers\": \"${configtoml_p2p_persistent_peers}\",
+      \"p2p_addr_book_file\": \"${configtoml_p2p_addr_book_file}\",
+      \"p2p_addr_book_strict\": \"${configtoml_p2p_addr_book_strict}\",
+      \"p2p_max_num_inbound_peers\": \"${configtoml_p2p_max_num_inbound_peers}\",
+      \"p2p_max_num_outbound_peers\": \"${configtoml_p2p_max_num_outbound_peers}\",
+      \"p2p_unconditional_peer_ids\": \"${configtoml_p2p_unconditional_peer_ids}\",
+      \"p2p_persistent_peers_max_dial_period\": \"${configtoml_p2p_persistent_peers_max_dial_period}\",
+      \"p2p_flush_throttle_timeout\": \"${configtoml_p2p_flush_throttle_timeout}\",
+      \"p2p_max_packet_msg_payload_size\": \"${configtoml_p2p_max_packet_msg_payload_size}\",
+      \"p2p_send_rate\": \"${configtoml_p2p_send_rate}\",
+      \"p2p_recv_rate\": \"${configtoml_p2p_recv_rate}\",
+      \"p2p_pex\": \"${configtoml_p2p_pex}\",
+      \"p2p_seed_mode\": \"${configtoml_p2p_seed_mode}\",
+      \"p2p_private_peer_ids\": \"${configtoml_p2p_private_peer_ids}\",
+      \"p2p_allow_duplicate_ip\": \"${configtoml_p2p_allow_duplicate_ip}\",
+      \"p2p_handshake_timeout\": \"${configtoml_p2p_handshake_timeout}\",
+      \"p2p_dial_timeout\": \"${configtoml_p2p_dial_timeout}\",
+      \"mempool_type\": \"${configtoml_mempool_type}\",
+      \"mempool_recheck\": \"${configtoml_mempool_recheck}\",
+      \"mempool_recheck_timeout\": \"${configtoml_mempool_recheck_timeout}\",
+      \"mempool_broadcast\": \"${configtoml_mempool_broadcast}\",
+      \"mempool_wal_dir\": \"${configtoml_mempool_wal_dir}\",
+      \"mempool_size\": \"${configtoml_mempool_size}\",
+      \"mempool_max_tx_bytes\": \"${configtoml_mempool_max_tx_bytes}\",
+      \"mempool_max_txs_bytes\": \"${configtoml_mempool_max_txs_bytes}\",
+      \"mempool_cache_size\": \"${configtoml_mempool_cache_size}\",
+      \"mempool_keep_invalid_txs_in_cache\": \"${configtoml_mempool_keep_invalid_txs_in_cache}\",
+      \"mempool_experimental_max_gossip_connections_to_persistent_peers\": \"${configtoml_mempool_experimental_max_gossip_connections_to_persistent_peers}\",
+      \"mempool_experimental_max_gossip_connections_to_non_persistent_peers\": \"${configtoml_mempool_experimental_max_gossip_connections_to_non_persistent_peers}\",
+      \"statesync_enable\": \"${configtoml_statesync_enable}\",
+      \"statesync_rpc_servers\": \"${configtoml_statesync_rpc_servers}\",
+      \"statesync_trust_height\": \"${configtoml_statesync_trust_height}\",
+      \"statesync_trust_hash\": \"${configtoml_statesync_trust_hash}\",
+      \"statesync_trust_period\": \"${configtoml_statesync_trust_period}\",
+      \"statesync_discovery_time\": \"${configtoml_statesync_discovery_time}\",
+      \"statesync_temp_dir\": \"${configtoml_statesync_temp_dir}\",
+      \"statesync_chunk_request_timeout\": \"${configtoml_statesync_chunk_request_timeout}\",
+      \"statesync_chunk_fetchers\": \"${configtoml_statesync_chunk_fetchers}\",
+      \"blocksync_version\": \"${configtoml_blocksync_version}\",
+      \"consensus_wal_file\": \"${configtoml_consensus_wal_file}\",
+      \"consensus_timeout_propose\": \"${configtoml_consensus_timeout_propose}\",
+      \"consensus_timeout_propose_delta\": \"${configtoml_consensus_timeout_propose_delta}\",
+      \"consensus_timeout_prevote\": \"${configtoml_consensus_timeout_prevote}\",
+      \"consensus_timeout_prevote_delta\": \"${configtoml_consensus_timeout_prevote_delta}\",
+      \"consensus_timeout_precommit\": \"${configtoml_consensus_timeout_precommit}\",
+      \"consensus_timeout_precommit_delta\": \"${configtoml_consensus_timeout_precommit_delta}\",
+      \"consensus_timeout_commit\": \"${configtoml_consensus_timeout_commit}\",
+      \"consensus_skip_timeout_commit\": \"${configtoml_consensus_skip_timeout_commit}\",
+      \"consensus_double_sign_check_height\": \"${configtoml_consensus_double_sign_check_height}\",
+      \"consensus_create_empty_blocks\": \"${configtoml_consensus_create_empty_blocks}\",
+      \"consensus_create_empty_blocks_interval\": \"${configtoml_consensus_create_empty_blocks_interval}\",
+      \"consensus_peer_gossip_sleep_duration\": \"${configtoml_consensus_peer_gossip_sleep_duration}\",
+      \"consensus_peer_gossip_intraloop_sleep_duration\": \"${configtoml_consensus_peer_gossip_intraloop_sleep_duration}\",
+      \"consensus_peer_query_maj23_sleep_duration\": \"${configtoml_consensus_peer_query_maj23_sleep_duration}\",
+      \"storage_discard_abci_responses\": \"${configtoml_storage_discard_abci_responses}\",
+	    \"storage_experimental_db_key_layout\": \"${configtoml_storage_experimental_db_key_layout}\",
+      \"storage_compact\": \"${configtoml_storage_compact}\",
+      \"storage_compaction_interval\": \"${configtoml_storage_compaction_interval}\",
+      \"storage_pruning_interval\": \"${configtoml_storage_pruning_interval}\",
+      \"storage_pruning_data_companion_enabled\": \"${configtoml_storage_pruning_data_companion_enabled}\",
+      \"storage_pruning_data_companion_initial_block_retain_height\": \"${configtoml_storage_pruning_data_companion_initial_block_retain_height}\",
+      \"storage_pruning_data_companion_initial_block_results_retain_height\": \"${configtoml_storage_pruning_data_companion_initial_block_results_retain_height}\",
+      \"tx_index_indexer\": \"${configtoml_tx_index_indexer}\",
+      \"tx_index_psql_conn\": \"${configtoml_tx_index_psql_conn}\",
+      \"instrumentation_prometheus\": \"${configtoml_instrumentation_prometheus}\",
+      \"instrumentation_prometheus_listen_addr\": \"${configtoml_instrumentation_prometheus_listen_addr}\",
+      \"instrumentation_max_open_connections\": \"${configtoml_instrumentation_max_open_connections}\",
+      \"instrumentation_namespace\": \"${configtoml_instrumentation_namespace}\"
+    }"
 
 		jq -n \
+			--arg chain_id "$chain_id" \
 			--arg moniker "$moniker" \
 			--arg network "$network" \
 			--argjson validators "$validators" \
@@ -6400,167 +6529,11 @@ cmd_init() {
 			--arg wallet_address "$wallet_address" \
 			--arg wallet_balance "$wallet_balance" \
 			--argjson nodes "$(echo "[${nodes_combined}]" | jq .)" \
-			--arg clienttoml_chain_id "$clienttoml_chain_id" \
-			--arg clienttoml_keyring_backend "$clienttoml_keyring_backend" \
-			--arg clienttoml_keyring_default_keyname "$clienttoml_keyring_default_keyname" \
-			--arg clienttoml_output "$clienttoml_output" \
-			--arg clienttoml_node "$clienttoml_node" \
-			--arg clienttoml_broadcast_mode "$clienttoml_broadcast_mode" \
-			--arg clienttoml_grpc_address "$clienttoml_grpc_address" \
-			--arg clienttoml_grpc_insecure "$clienttoml_grpc_insecure" \
-			--arg apptoml_pruning "$apptoml_pruning" \
-			--arg apptoml_pruning_keep_recent "$apptoml_pruning_keep_recent" \
-			--arg apptoml_pruning_interval "$apptoml_pruning_interval" \
-			--arg apptoml_halt_height "$apptoml_halt_height" \
-			--arg apptoml_halt_time "$apptoml_halt_time" \
-			--arg apptoml_min_retain_blocks "$apptoml_min_retain_blocks" \
-			--arg apptoml_inter_block_cache "$apptoml_inter_block_cache" \
-			--arg apptoml_iavl_cache_size "$apptoml_iavl_cache_size" \
-			--arg apptoml_iavl_disable_fastnode "$apptoml_iavl_disable_fastnode" \
-			--arg apptoml_app_db_backend "$apptoml_app_db_backend" \
-			--arg apptoml_telemetry_service_name "$apptoml_telemetry_service_name" \
-			--arg apptoml_telemetry_enabled "$apptoml_telemetry_enabled" \
-			--arg apptoml_telemetry_enable_hostname "$apptoml_telemetry_enable_hostname" \
-			--arg apptoml_telemetry_enable_hostname_label "$apptoml_telemetry_enable_hostname_label" \
-			--arg apptoml_telemetry_enable_service_label "$apptoml_telemetry_enable_service_label" \
-			--arg apptoml_telemetry_prometheus_retention_time "$apptoml_telemetry_prometheus_retention_time" \
-			--arg apptoml_telemetry_global_labels "$apptoml_telemetry_global_labels" \
-			--arg apptoml_telemetry_metrics_sink "$apptoml_telemetry_metrics_sink" \
-			--arg apptoml_telemetry_statsd_addr "$apptoml_telemetry_statsd_addr" \
-			--arg apptoml_telemetry_datadog_hostname "$apptoml_telemetry_datadog_hostname" \
-			--arg apptoml_beacon_kit_chain_spec "$apptoml_beacon_kit_chain_spec" \
-			--arg apptoml_beacon_kit_chain_spec_file "$apptoml_beacon_kit_chain_spec_file" \
-			--arg apptoml_beacon_kit_shutdown_timeout "$apptoml_beacon_kit_shutdown_timeout" \
-			--arg apptoml_beacon_kit_engine_rpc_dial_url "$apptoml_beacon_kit_engine_rpc_dial_url" \
-			--arg apptoml_beacon_kit_engine_rpc_timeout "$apptoml_beacon_kit_engine_rpc_timeout" \
-			--arg apptoml_beacon_kit_engine_rpc_retry_interval "$apptoml_beacon_kit_engine_rpc_retry_interval" \
-			--arg apptoml_beacon_kit_engine_rpc_max_retry_interval "$apptoml_beacon_kit_engine_rpc_max_retry_interval" \
-			--arg apptoml_beacon_kit_engine_rpc_startup_check_interval "$apptoml_beacon_kit_engine_rpc_startup_check_interval" \
-			--arg apptoml_beacon_kit_engine_rpc_jwt_refresh_interval "$apptoml_beacon_kit_engine_rpc_jwt_refresh_interval" \
-			--arg apptoml_beacon_kit_engine_jwt_secret_path "$apptoml_beacon_kit_engine_jwt_secret_path" \
-			--arg apptoml_beacon_kit_logger_time_format "$apptoml_beacon_kit_logger_time_format" \
-			--arg apptoml_beacon_kit_logger_log_level "$apptoml_beacon_kit_logger_log_level" \
-			--arg apptoml_beacon_kit_logger_style "$apptoml_beacon_kit_logger_style" \
-			--arg apptoml_beacon_kit_kzg_trusted_setup_path "$apptoml_beacon_kit_kzg_trusted_setup_path" \
-			--arg apptoml_beacon_kit_kzg_implementation "$apptoml_beacon_kit_kzg_implementation" \
-			--arg apptoml_beacon_kit_payload_builder_enabled "$apptoml_beacon_kit_payload_builder_enabled" \
-			--arg apptoml_beacon_kit_payload_builder_suggested_fee_recipient "$apptoml_beacon_kit_payload_builder_suggested_fee_recipient" \
-			--arg apptoml_beacon_kit_payload_builder_payload_timeout "$apptoml_beacon_kit_payload_builder_payload_timeout" \
-			--arg apptoml_beacon_kit_validator_graffiti "$apptoml_beacon_kit_validator_graffiti" \
-			--arg apptoml_beacon_kit_validator_availability_window "$apptoml_beacon_kit_validator_availability_window" \
-			--arg apptoml_beacon_kit_node_api_enabled "$apptoml_beacon_kit_node_api_enabled" \
-			--arg apptoml_beacon_kit_node_api_address "$apptoml_beacon_kit_node_api_address" \
-			--arg apptoml_beacon_kit_node_api_logging "$apptoml_beacon_kit_node_api_logging" \
-			--arg configtoml_version "$configtoml_version" \
-			--arg configtoml_proxy_app "$configtoml_proxy_app" \
-			--arg configtoml_moniker "$configtoml_moniker" \
-			--arg configtoml_db_backend "$configtoml_db_backend" \
-			--arg configtoml_db_dir "$configtoml_db_dir" \
-			--arg configtoml_log_level "$configtoml_log_level" \
-			--arg configtoml_log_format "$configtoml_log_format" \
-			--arg configtoml_genesis_file "$configtoml_genesis_file" \
-			--arg configtoml_priv_validator_key_file "$configtoml_priv_validator_key_file" \
-			--arg configtoml_priv_validator_state_file "$configtoml_priv_validator_state_file" \
-			--arg configtoml_priv_validator_laddr "$configtoml_priv_validator_laddr" \
-			--arg configtoml_node_key_file "$configtoml_node_key_file" \
-			--arg configtoml_abci "$configtoml_abci" \
-			--arg configtoml_filter_peers "$configtoml_filter_peers" \
-			--arg configtoml_rpc_laddr "$configtoml_rpc_laddr" \
-			--arg configtoml_rpc_unsafe "$configtoml_rpc_unsafe" \
-			--arg configtoml_rpc_cors_allowed_origins "$configtoml_rpc_cors_allowed_origins" \
-			--arg configtoml_rpc_cors_allowed_methods "$configtoml_rpc_cors_allowed_methods" \
-			--arg configtoml_rpc_cors_allowed_headers "$configtoml_rpc_cors_allowed_headers" \
-			--arg configtoml_rpc_max_open_connections "$configtoml_rpc_max_open_connections" \
-			--arg configtoml_rpc_max_subscription_clients "$configtoml_rpc_max_subscription_clients" \
-			--arg configtoml_rpc_max_subscriptions_per_client "$configtoml_rpc_max_subscriptions_per_client" \
-			--arg configtoml_rpc_experimental_subscription_buffer_size "$configtoml_rpc_experimental_subscription_buffer_size" \
-			--arg configtoml_rpc_experimental_websocket_write_buffer_size "$configtoml_rpc_experimental_websocket_write_buffer_size" \
-			--arg configtoml_rpc_experimental_close_on_slow_client "$configtoml_rpc_experimental_close_on_slow_client" \
-			--arg configtoml_rpc_timeout_broadcast_tx_commit "$configtoml_rpc_timeout_broadcast_tx_commit" \
-			--arg configtoml_rpc_max_request_batch_size "$configtoml_rpc_max_request_batch_size" \
-			--arg configtoml_rpc_max_body_bytes "$configtoml_rpc_max_body_bytes" \
-			--arg configtoml_rpc_max_header_bytes "$configtoml_rpc_max_header_bytes" \
-			--arg configtoml_rpc_tls_cert_file "$configtoml_rpc_tls_cert_file" \
-			--arg configtoml_rpc_tls_key_file "$configtoml_rpc_tls_key_file" \
-			--arg configtoml_rpc_pprof_laddr "$configtoml_rpc_pprof_laddr" \
-			--arg configtoml_grpc_laddr "$configtoml_grpc_laddr" \
-			--arg configtoml_grpc_version_service_enabled "$configtoml_grpc_version_service_enabled" \
-			--arg configtoml_grpc_block_service_enabled "$configtoml_grpc_block_service_enabled" \
-			--arg configtoml_grpc_block_results_service_enabled "$configtoml_grpc_block_results_service_enabled" \
-			--arg configtoml_grpc_privileged_laddr "$configtoml_grpc_privileged_laddr" \
-			--arg configtoml_grpc_privileged_pruning_service_enabled "$configtoml_grpc_privileged_pruning_service_enabled" \
-			--arg configtoml_p2p_laddr "$configtoml_p2p_laddr" \
-			--arg configtoml_p2p_external_address "$configtoml_p2p_external_address" \
-			--arg configtoml_p2p_seeds "$configtoml_p2p_seeds" \
-			--arg configtoml_p2p_persistent_peers "$configtoml_p2p_persistent_peers" \
-			--arg configtoml_p2p_addr_book_file "$configtoml_p2p_addr_book_file" \
-			--arg configtoml_p2p_addr_book_strict "$configtoml_p2p_addr_book_strict" \
-			--arg configtoml_p2p_max_num_inbound_peers "$configtoml_p2p_max_num_inbound_peers" \
-			--arg configtoml_p2p_max_num_outbound_peers "$configtoml_p2p_max_num_outbound_peers" \
-			--arg configtoml_p2p_unconditional_peer_ids "$configtoml_p2p_unconditional_peer_ids" \
-			--arg configtoml_p2p_persistent_peers_max_dial_period "$configtoml_p2p_persistent_peers_max_dial_period" \
-			--arg configtoml_p2p_flush_throttle_timeout "$configtoml_p2p_flush_throttle_timeout" \
-			--arg configtoml_p2p_max_packet_msg_payload_size "$configtoml_p2p_max_packet_msg_payload_size" \
-			--arg configtoml_p2p_send_rate "$configtoml_p2p_send_rate" \
-			--arg configtoml_p2p_recv_rate "$configtoml_p2p_recv_rate" \
-			--arg configtoml_p2p_pex "$configtoml_p2p_pex" \
-			--arg configtoml_p2p_seed_mode "$configtoml_p2p_seed_mode" \
-			--arg configtoml_p2p_private_peer_ids "$configtoml_p2p_private_peer_ids" \
-			--arg configtoml_p2p_allow_duplicate_ip "$configtoml_p2p_allow_duplicate_ip" \
-			--arg configtoml_p2p_handshake_timeout "$configtoml_p2p_handshake_timeout" \
-			--arg configtoml_p2p_dial_timeout "$configtoml_p2p_dial_timeout" \
-			--arg configtoml_mempool_type "$configtoml_mempool_type" \
-			--arg configtoml_mempool_recheck "$configtoml_mempool_recheck" \
-			--arg configtoml_mempool_recheck_timeout "$configtoml_mempool_recheck_timeout" \
-			--arg configtoml_mempool_broadcast "$configtoml_mempool_broadcast" \
-			--arg configtoml_mempool_wal_dir "$configtoml_mempool_wal_dir" \
-			--arg configtoml_mempool_size "$configtoml_mempool_size" \
-			--arg configtoml_mempool_max_tx_bytes "$configtoml_mempool_max_tx_bytes" \
-			--arg configtoml_mempool_max_txs_bytes "$configtoml_mempool_max_txs_bytes" \
-			--arg configtoml_mempool_cache_size "$configtoml_mempool_cache_size" \
-			--arg configtoml_mempool_keep_invalid_txs_in_cache "$configtoml_mempool_keep_invalid_txs_in_cache" \
-			--arg configtoml_mempool_experimental_max_gossip_connections_to_persistent_peers "$configtoml_mempool_experimental_max_gossip_connections_to_persistent_peers" \
-			--arg configtoml_mempool_experimental_max_gossip_connections_to_non_persistent_peers "$configtoml_mempool_experimental_max_gossip_connections_to_non_persistent_peers" \
-			--arg configtoml_statesync_enable "$configtoml_statesync_enable" \
-			--arg configtoml_statesync_rpc_servers "$configtoml_statesync_rpc_servers" \
-			--arg configtoml_statesync_trust_height "$configtoml_statesync_trust_height" \
-			--arg configtoml_statesync_trust_hash "$configtoml_statesync_trust_hash" \
-			--arg configtoml_statesync_trust_period "$configtoml_statesync_trust_period" \
-			--arg configtoml_statesync_discovery_time "$configtoml_statesync_discovery_time" \
-			--arg configtoml_statesync_temp_dir "$configtoml_statesync_temp_dir" \
-			--arg configtoml_statesync_chunk_request_timeout "$configtoml_statesync_chunk_request_timeout" \
-			--arg configtoml_statesync_chunk_fetchers "$configtoml_statesync_chunk_fetchers" \
-			--arg configtoml_blocksync_version "$configtoml_blocksync_version" \
-			--arg configtoml_consensus_wal_file "$configtoml_consensus_wal_file" \
-			--arg configtoml_consensus_timeout_propose "$configtoml_consensus_timeout_propose" \
-			--arg configtoml_consensus_timeout_propose_delta "$configtoml_consensus_timeout_propose_delta" \
-			--arg configtoml_consensus_timeout_prevote "$configtoml_consensus_timeout_prevote" \
-			--arg configtoml_consensus_timeout_prevote_delta "$configtoml_consensus_timeout_prevote_delta" \
-			--arg configtoml_consensus_timeout_precommit "$configtoml_consensus_timeout_precommit" \
-			--arg configtoml_consensus_timeout_precommit_delta "$configtoml_consensus_timeout_precommit_delta" \
-			--arg configtoml_consensus_timeout_commit "$configtoml_consensus_timeout_commit" \
-			--arg configtoml_consensus_skip_timeout_commit "$configtoml_consensus_skip_timeout_commit" \
-			--arg configtoml_consensus_double_sign_check_height "$configtoml_consensus_double_sign_check_height" \
-			--arg configtoml_consensus_create_empty_blocks "$configtoml_consensus_create_empty_blocks" \
-			--arg configtoml_consensus_create_empty_blocks_interval "$configtoml_consensus_create_empty_blocks_interval" \
-			--arg configtoml_consensus_peer_gossip_sleep_duration "$configtoml_consensus_peer_gossip_sleep_duration" \
-			--arg configtoml_consensus_peer_gossip_intraloop_sleep_duration "$configtoml_consensus_peer_gossip_intraloop_sleep_duration" \
-			--arg configtoml_consensus_peer_query_maj23_sleep_duration "$configtoml_consensus_peer_query_maj23_sleep_duration" \
-			--arg configtoml_storage_discard_abci_responses "$configtoml_storage_discard_abci_responses" \
-			--arg configtoml_storage_experimental_db_key_layout "$configtoml_storage_experimental_db_key_layout" \
-			--arg configtoml_storage_compact "$configtoml_storage_compact" \
-			--arg configtoml_storage_compaction_interval "$configtoml_storage_compaction_interval" \
-			--arg configtoml_storage_pruning_interval "$configtoml_storage_pruning_interval" \
-			--arg configtoml_storage_pruning_data_companion_enabled "$configtoml_storage_pruning_data_companion_enabled" \
-			--arg configtoml_storage_pruning_data_companion_initial_block_retain_height "$configtoml_storage_pruning_data_companion_initial_block_retain_height" \
-			--arg configtoml_storage_pruning_data_companion_initial_block_results_retain_height "$configtoml_storage_pruning_data_companion_initial_block_results_retain_height" \
-			--arg configtoml_tx_index_indexer "$configtoml_tx_index_indexer" \
-			--arg configtoml_tx_index_psql_conn "$configtoml_tx_index_psql_conn" \
-			--arg configtoml_instrumentation_prometheus "$configtoml_instrumentation_prometheus" \
-			--arg configtoml_instrumentation_prometheus_listen_addr "$configtoml_instrumentation_prometheus_listen_addr" \
-			--arg configtoml_instrumentation_max_open_connections "$configtoml_instrumentation_max_open_connections" \
-			--arg configtoml_instrumentation_namespace "$configtoml_instrumentation_namespace" \
+			--argjson clienttoml "$clienttoml" \
+			--argjson apptoml "$apptoml" \
+			--argjson configtoml "$configtoml" \
 			'{
+            chain_id: $chain_id,
             moniker: $moniker,
             network: $network,
             validators: $validators,
@@ -6575,166 +6548,9 @@ cmd_init() {
             wallet_address: $wallet_address,
             wallet_balance: $wallet_balance,
             nodes: $nodes,
-            clienttoml_chain_id: $clienttoml_chain_id,
-            clienttoml_keyring_backend: $clienttoml_keyring_backend,
-            clienttoml_keyring_default_keyname: $clienttoml_keyring_default_keyname,
-            clienttoml_output: $clienttoml_output,
-            clienttoml_node: $clienttoml_node,
-            clienttoml_broadcast_mode: $clienttoml_broadcast_mode,
-            clienttoml_grpc_address: $clienttoml_grpc_address,
-            clienttoml_grpc_insecure: $clienttoml_grpc_insecure,
-            apptoml_pruning: $apptoml_pruning,
-            apptoml_pruning_keep_recent: $apptoml_pruning_keep_recent,
-            apptoml_pruning_interval: $apptoml_pruning_interval,
-            apptoml_halt_height: $apptoml_halt_height,
-            apptoml_halt_time: $apptoml_halt_time,
-            apptoml_min_retain_blocks: $apptoml_min_retain_blocks,
-            apptoml_inter_block_cache: $apptoml_inter_block_cache,
-            apptoml_iavl_cache_size: $apptoml_iavl_cache_size,
-            apptoml_iavl_disable_fastnode: $apptoml_iavl_disable_fastnode,
-            apptoml_app_db_backend: $apptoml_app_db_backend,
-            apptoml_telemetry_service_name: $apptoml_telemetry_service_name,
-            apptoml_telemetry_enabled: $apptoml_telemetry_enabled,
-            apptoml_telemetry_enable_hostname: $apptoml_telemetry_enable_hostname,
-            apptoml_telemetry_enable_hostname_label: $apptoml_telemetry_enable_hostname_label,
-            apptoml_telemetry_enable_service_label: $apptoml_telemetry_enable_service_label,
-            apptoml_telemetry_prometheus_retention_time: $apptoml_telemetry_prometheus_retention_time,
-            apptoml_telemetry_global_labels: $apptoml_telemetry_global_labels,
-            apptoml_telemetry_metrics_sink: $apptoml_telemetry_metrics_sink,
-            apptoml_telemetry_statsd_addr: $apptoml_telemetry_statsd_addr,
-            apptoml_telemetry_datadog_hostname: $apptoml_telemetry_datadog_hostname,
-            apptoml_beacon_kit_chain_spec: $apptoml_beacon_kit_chain_spec,
-            apptoml_beacon_kit_chain_spec_file: $apptoml_beacon_kit_chain_spec_file,
-            apptoml_beacon_kit_shutdown_timeout: $apptoml_beacon_kit_shutdown_timeout,
-            apptoml_beacon_kit_engine_rpc_dial_url: $apptoml_beacon_kit_engine_rpc_dial_url,
-            apptoml_beacon_kit_engine_rpc_timeout: $apptoml_beacon_kit_engine_rpc_timeout,
-            apptoml_beacon_kit_engine_rpc_retry_interval: $apptoml_beacon_kit_engine_rpc_retry_interval,
-            apptoml_beacon_kit_engine_rpc_max_retry_interval: $apptoml_beacon_kit_engine_rpc_max_retry_interval,
-            apptoml_beacon_kit_engine_rpc_startup_check_interval: $apptoml_beacon_kit_engine_rpc_startup_check_interval,
-            apptoml_beacon_kit_engine_rpc_jwt_refresh_interval: $apptoml_beacon_kit_engine_rpc_jwt_refresh_interval,
-            apptoml_beacon_kit_engine_jwt_secret_path: $apptoml_beacon_kit_engine_jwt_secret_path,
-            apptoml_beacon_kit_logger_time_format: $apptoml_beacon_kit_logger_time_format,
-            apptoml_beacon_kit_logger_log_level: $apptoml_beacon_kit_logger_log_level,
-            apptoml_beacon_kit_logger_style: $apptoml_beacon_kit_logger_style,
-            apptoml_beacon_kit_kzg_trusted_setup_path: $apptoml_beacon_kit_kzg_trusted_setup_path,
-            apptoml_beacon_kit_kzg_implementation: $apptoml_beacon_kit_kzg_implementation,
-            apptoml_beacon_kit_payload_builder_enabled: $apptoml_beacon_kit_payload_builder_enabled,
-            apptoml_beacon_kit_payload_builder_suggested_fee_recipient: $apptoml_beacon_kit_payload_builder_suggested_fee_recipient,
-            apptoml_beacon_kit_payload_builder_payload_timeout: $apptoml_beacon_kit_payload_builder_payload_timeout,
-            apptoml_beacon_kit_validator_graffiti: $apptoml_beacon_kit_validator_graffiti,
-            apptoml_beacon_kit_validator_availability_window: $apptoml_beacon_kit_validator_availability_window,
-            apptoml_beacon_kit_node_api_enabled: $apptoml_beacon_kit_node_api_enabled,
-            apptoml_beacon_kit_node_api_address: $apptoml_beacon_kit_node_api_address,
-            apptoml_beacon_kit_node_api_logging: $apptoml_beacon_kit_node_api_logging,
-            configtoml_version: $configtoml_version,
-            configtoml_proxy_app: $configtoml_proxy_app,
-            configtoml_moniker: $configtoml_moniker,
-            configtoml_db_backend: $configtoml_db_backend,
-            configtoml_db_dir: $configtoml_db_dir,
-            configtoml_log_level: $configtoml_log_level,
-            configtoml_log_format: $configtoml_log_format,
-            configtoml_genesis_file: $configtoml_genesis_file,
-            configtoml_priv_validator_key_file: $configtoml_priv_validator_key_file,
-            configtoml_priv_validator_state_file: $configtoml_priv_validator_state_file,
-            configtoml_priv_validator_laddr: $configtoml_priv_validator_laddr,
-            configtoml_node_key_file: $configtoml_node_key_file,
-            configtoml_abci: $configtoml_abci,
-            configtoml_filter_peers: $configtoml_filter_peers,
-            configtoml_rpc_laddr: $configtoml_rpc_laddr,
-            configtoml_rpc_unsafe: $configtoml_rpc_unsafe,
-            configtoml_rpc_cors_allowed_origins: $configtoml_rpc_cors_allowed_origins,
-            configtoml_rpc_cors_allowed_methods: $configtoml_rpc_cors_allowed_methods,
-            configtoml_rpc_cors_allowed_headers: $configtoml_rpc_cors_allowed_headers,
-            configtoml_rpc_max_open_connections: $configtoml_rpc_max_open_connections,
-            configtoml_rpc_max_subscription_clients: $configtoml_rpc_max_subscription_clients,
-            configtoml_rpc_max_subscriptions_per_client: $configtoml_rpc_max_subscriptions_per_client,
-            configtoml_rpc_experimental_subscription_buffer_size: $configtoml_rpc_experimental_subscription_buffer_size,
-            configtoml_rpc_experimental_websocket_write_buffer_size: $configtoml_rpc_experimental_websocket_write_buffer_size,
-            configtoml_rpc_experimental_close_on_slow_client: $configtoml_rpc_experimental_close_on_slow_client,
-            configtoml_rpc_timeout_broadcast_tx_commit: $configtoml_rpc_timeout_broadcast_tx_commit,
-            configtoml_rpc_max_request_batch_size: $configtoml_rpc_max_request_batch_size,
-            configtoml_rpc_max_body_bytes: $configtoml_rpc_max_body_bytes,
-            configtoml_rpc_max_header_bytes: $configtoml_rpc_max_header_bytes,
-            configtoml_rpc_tls_cert_file: $configtoml_rpc_tls_cert_file,
-            configtoml_rpc_tls_key_file: $configtoml_rpc_tls_key_file,
-            configtoml_rpc_pprof_laddr: $configtoml_rpc_pprof_laddr,
-            configtoml_grpc_laddr: $configtoml_grpc_laddr,
-            configtoml_grpc_version_service_enabled: $configtoml_grpc_version_service_enabled,
-            configtoml_grpc_block_service_enabled: $configtoml_grpc_block_service_enabled,
-            configtoml_grpc_block_results_service_enabled: $configtoml_grpc_block_results_service_enabled,
-            configtoml_grpc_privileged_laddr: $configtoml_grpc_privileged_laddr,
-            configtoml_grpc_privileged_pruning_service_enabled: $configtoml_grpc_privileged_pruning_service_enabled,
-            configtoml_p2p_laddr: $configtoml_p2p_laddr,
-            configtoml_p2p_external_address: $configtoml_p2p_external_address,
-            configtoml_p2p_seeds: $configtoml_p2p_seeds,
-            configtoml_p2p_persistent_peers: $configtoml_p2p_persistent_peers,
-            configtoml_p2p_addr_book_file: $configtoml_p2p_addr_book_file,
-            configtoml_p2p_addr_book_strict: $configtoml_p2p_addr_book_strict,
-            configtoml_p2p_max_num_inbound_peers: $configtoml_p2p_max_num_inbound_peers,
-            configtoml_p2p_max_num_outbound_peers: $configtoml_p2p_max_num_outbound_peers,
-            configtoml_p2p_unconditional_peer_ids: $configtoml_p2p_unconditional_peer_ids,
-            configtoml_p2p_persistent_peers_max_dial_period: $configtoml_p2p_persistent_peers_max_dial_period,
-            configtoml_p2p_flush_throttle_timeout: $configtoml_p2p_flush_throttle_timeout,
-            configtoml_p2p_max_packet_msg_payload_size: $configtoml_p2p_max_packet_msg_payload_size,
-            configtoml_p2p_send_rate: $configtoml_p2p_send_rate,
-            configtoml_p2p_recv_rate: $configtoml_p2p_recv_rate,
-            configtoml_p2p_pex: $configtoml_p2p_pex,
-            configtoml_p2p_seed_mode: $configtoml_p2p_seed_mode,
-            configtoml_p2p_private_peer_ids: $configtoml_p2p_private_peer_ids,
-            configtoml_p2p_allow_duplicate_ip: $configtoml_p2p_allow_duplicate_ip,
-            configtoml_p2p_handshake_timeout: $configtoml_p2p_handshake_timeout,
-            configtoml_p2p_dial_timeout: $configtoml_p2p_dial_timeout,
-            configtoml_mempool_type: $configtoml_mempool_type,
-            configtoml_mempool_recheck: $configtoml_mempool_recheck,
-            configtoml_mempool_recheck_timeout: $configtoml_mempool_recheck_timeout,
-            configtoml_mempool_broadcast: $configtoml_mempool_broadcast,
-            configtoml_mempool_wal_dir: $configtoml_mempool_wal_dir,
-            configtoml_mempool_size: $configtoml_mempool_size,
-            configtoml_mempool_max_tx_bytes: $configtoml_mempool_max_tx_bytes,
-            configtoml_mempool_max_txs_bytes: $configtoml_mempool_max_txs_bytes,
-            configtoml_mempool_cache_size: $configtoml_mempool_cache_size,
-            configtoml_mempool_keep_invalid_txs_in_cache: $configtoml_mempool_keep_invalid_txs_in_cache,
-            configtoml_mempool_experimental_max_gossip_connections_to_persistent_peers: $configtoml_mempool_experimental_max_gossip_connections_to_persistent_peers,
-            configtoml_mempool_experimental_max_gossip_connections_to_non_persistent_peers: $configtoml_mempool_experimental_max_gossip_connections_to_non_persistent_peers,
-            configtoml_statesync_enable: $configtoml_statesync_enable,
-            configtoml_statesync_rpc_servers: $configtoml_statesync_rpc_servers,
-            configtoml_statesync_trust_height: $configtoml_statesync_trust_height,
-            configtoml_statesync_trust_hash: $configtoml_statesync_trust_hash,
-            configtoml_statesync_trust_period: $configtoml_statesync_trust_period,
-            configtoml_statesync_discovery_time: $configtoml_statesync_discovery_time,
-            configtoml_statesync_temp_dir: $configtoml_statesync_temp_dir,
-            configtoml_statesync_chunk_request_timeout: $configtoml_statesync_chunk_request_timeout,
-            configtoml_statesync_chunk_fetchers: $configtoml_statesync_chunk_fetchers,
-            configtoml_blocksync_version: $configtoml_blocksync_version,
-            configtoml_consensus_wal_file: $configtoml_consensus_wal_file,
-            configtoml_consensus_timeout_propose: $configtoml_consensus_timeout_propose,
-            configtoml_consensus_timeout_propose_delta: $configtoml_consensus_timeout_propose_delta,
-            configtoml_consensus_timeout_prevote: $configtoml_consensus_timeout_prevote,
-            configtoml_consensus_timeout_prevote_delta: $configtoml_consensus_timeout_prevote_delta,
-            configtoml_consensus_timeout_precommit: $configtoml_consensus_timeout_precommit,
-            configtoml_consensus_timeout_precommit_delta: $configtoml_consensus_timeout_precommit_delta,
-            configtoml_consensus_timeout_commit: $configtoml_consensus_timeout_commit,
-            configtoml_consensus_skip_timeout_commit: $configtoml_consensus_skip_timeout_commit,
-            configtoml_consensus_double_sign_check_height: $configtoml_consensus_double_sign_check_height,
-            configtoml_consensus_create_empty_blocks: $configtoml_consensus_create_empty_blocks,
-            configtoml_consensus_create_empty_blocks_interval: $configtoml_consensus_create_empty_blocks_interval,
-            configtoml_consensus_peer_gossip_sleep_duration: $configtoml_consensus_peer_gossip_sleep_duration,
-            configtoml_consensus_peer_gossip_intraloop_sleep_duration: $configtoml_consensus_peer_gossip_intraloop_sleep_duration,
-            configtoml_consensus_peer_query_maj23_sleep_duration: $configtoml_consensus_peer_query_maj23_sleep_duration,
-            configtoml_storage_discard_abci_responses: $configtoml_storage_discard_abci_responses,
-            configtoml_storage_experimental_db_key_layout: $configtoml_storage_experimental_db_key_layout,
-            configtoml_storage_compact: $configtoml_storage_compact,
-            configtoml_storage_compaction_interval: $configtoml_storage_compaction_interval,
-            configtoml_storage_pruning_interval: $configtoml_storage_pruning_interval,
-            configtoml_storage_pruning_data_companion_enabled: $configtoml_storage_pruning_data_companion_enabled,
-            configtoml_storage_pruning_data_companion_initial_block_retain_height: $configtoml_storage_pruning_data_companion_initial_block_retain_height,
-            configtoml_storage_pruning_data_companion_initial_block_results_retain_height: $configtoml_storage_pruning_data_companion_initial_block_results_retain_height,
-            configtoml_tx_index_indexer: $configtoml_tx_index_indexer,
-            configtoml_tx_index_psql_conn: $configtoml_tx_index_psql_conn,
-            configtoml_instrumentation_prometheus: $configtoml_instrumentation_prometheus,
-            configtoml_instrumentation_prometheus_listen_addr: $configtoml_instrumentation_prometheus_listen_addr,
-            configtoml_instrumentation_max_open_connections: $configtoml_instrumentation_max_open_connections,
-            configtoml_instrumentation_namespace: $configtoml_instrumentation_namespace,
+            clienttoml: $clienttoml,
+            apptoml: $apptoml,
+            configtoml: $configtoml
           }' >"${config_json_path}"
 
 		if [[ $? -eq 0 ]]; then
@@ -6898,8 +6714,14 @@ cmd_start() {
 		log_success "Beranode configuration file exists: ${beranodes_config_path}"
 	fi
 
-	# TODO: Implement JSON schema validation for beranodes.config.json
 	# This will ensure all required fields are present and properly formatted
+	# Validate the beranodes configuration JSON file before proceeding
+	if ! validate_beranodes_config "${beranodes_config_path}"; then
+		log_error "Configuration validation failed. Please review errors above and fix your beranodes.config.json file."
+		return 1
+	else
+		log_success "beranodes.config.json passed validation."
+	fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 3] Configuration Parsing
@@ -6941,6 +6763,7 @@ cmd_start() {
 
 	# Node-specific configurations (array of node objects)
 	local nodes=$(jq -r '.nodes' "${config_json_path}")
+	local nodes_count=$(echo "${nodes}" | jq -r '. | length')
 
 	# -------------------------------------------------------------------------
 	# [DEBUG] Node Configuration Inspection (Currently Disabled)
@@ -6948,46 +6771,6 @@ cmd_start() {
 	# Uncomment this section to debug individual node configurations.
 	# Useful for troubleshooting port conflicts or misconfigurations.
 	# -------------------------------------------------------------------------
-
-	# # echo "nodes: ${nodes}"
-	# for node in $(echo "${nodes}" | jq -c '.[]'); do
-	#     echo "node: ${node}"
-	#     echo "node role: $(echo "${node}" | jq -r '.role')"
-	#     echo "node moniker: $(echo "${node}" | jq -r '.moniker')"
-	#     echo "node network: $(echo "${node}" | jq -r '.network')"
-	#     echo "node wallet_address: $(echo "${node}" | jq -r '.wallet_address')"
-	#     echo "node ethrpc_port: $(echo "${node}" | jq -r '.ethrpc_port')"
-	#     echo "node ethp2p_port: $(echo "${node}" | jq -r '.ethp2p_port')"
-	#     echo "node ethproxy_port: $(echo "${node}" | jq -r '.ethproxy_port')"
-	#     echo "node el_ethrpc_port: $(echo "${node}" | jq -r '.el_ethrpc_port')"
-	#     echo "node el_authrpc_port: $(echo "${node}" | jq -r '.el_authrpc_port')"
-	#     echo "node el_eth_port: $(echo "${node}" | jq -r '.el_eth_port')"
-	#     echo "node el_prometheus_port: $(echo "${node}" | jq -r '.el_prometheus_port')"
-	#     echo "node cl_prometheus_port: $(echo "${node}" | jq -r '.cl_prometheus_port')"
-	# done
-
-	# -------------------------------------------------------------------------
-	# [STEP 4] KZG Trusted Setup Artifact Download (Currently Disabled)
-	# -------------------------------------------------------------------------
-	# The KZG trusted setup is required for EIP-4844 blob transactions.
-	# This section downloads the setup file if not already present.
-	# TODO: Re-enable when blob transaction support is implemented.
-	# -------------------------------------------------------------------------
-
-	# # Check if kzg-trusted-setup.json exists, otherwise download it
-	# if [[ ! -f "${beranodes_dir}/tmp/kzg-trusted-setup.json" ]]; then
-	#     log_info "Downloading kzg-trusted-setup.json to ${beranodes_dir}/tmp"
-	#     echo "$REPO_BEACONKIT/kzg-trusted-setup.json"
-	#     curl -s -o "${beranodes_dir}/tmp/kzg-trusted-setup.json" "$REPO_BEACONKIT/kzg-trusted-setup.json"
-	#     if [[ $? -eq 0 ]]; then
-	#         log_success "Downloaded kzg-trusted-setup.json successfully."
-	#     else
-	#         log_error "Failed to download kzg-trusted-setup.json."
-	#         return 1
-	#     fi
-	# else
-	#     log_info "kzg-trusted-setup.json already exists in ${beranodes_dir}/tmp"
-	# fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 5] Network-Specific Initialization
@@ -6998,7 +6781,7 @@ cmd_start() {
 	# -------------------------------------------------------------------------
 
 	if [[ "${network}" == "${CHAIN_NAME_DEVNET}" ]]; then
-		log_info "Starting Beranode in ${CHAIN_NAME_DEVNET} mode"
+		log_info "Starting Beranode in ${CHAIN_NAME_DEVNET} network"
 
 		# ---------------------------------------------------------------------
 		# [STEP 5.1] Mode Selection: Local Development
@@ -7011,24 +6794,750 @@ cmd_start() {
 		if [[ "${mode}" == "local" ]]; then
 			log_info "Starting Beranode in local mode"
 
-			# TODO: Implement node creation loop
-			# This will iterate through the requested node count and create:
-			# - Validator nodes (participate in consensus)
-			# - Full nodes (store complete blockchain history)
-			# - Pruned nodes (store recent state only)
-			#
-			# for i in $(seq 1 ${validators}); do
-			#   local validator_dir="${beranodes_dir}${BERANODES_PATH_NODES}/val-${i}"
-			#   mkdir -p "${validator_dir}"
-			#   create_validator_node "${beranodes_dir}" "${validator_dir}" \
-			#       "${moniker}-val-${i}" "${network}" "${wallet_address}" \
-			#       "${bin_beacond}" "${bin_bera_reth}" \
-			#       "${beranodes_dir}/tmp/kzg-trusted-setup.json" \
-			#       "${ethrpc_port}" "${ethp2p_port}" "${ethproxy_port}" \
-			#       "${el_ethrpc_port}" "${el_authrpc_port}" "${el_eth_port}" \
-			#       "${el_prometheus_port}" "${cl_prometheus_port}"
-			# done
+			# Do a a check if `beranode_dir/nodes` has any directories, if so, ask if the user wants to delete them
+			if [ -d "${beranode_dir}/nodes" ] && [ "$(ls -A "${beranode_dir}/nodes")" ]; then
+				log_warn "Node directories already exist in ${beranode_dir}/nodes"
+				read -p "Do you want to delete them? (y/n) " delete_nodes
+				if [ "${delete_nodes}" == "y" ]; then
+					rm -rf "${beranode_dir}/nodes"
+					log_info "Node directories deleted"
+				else
+					log_error "Node directories not deleted. stopping..."
+					return 1
+				fi
+			fi
+			mkdir -p "${beranode_dir}/nodes"
+			log_info "Node directories created in ${beranode_dir}/nodes"
 
+			local network=$(jq -r '.network' "${config_json_path}")
+			local chain_id="${CHAIN_ID_DEVNET}"
+			local chain_spec="${CHAIN_NAME_DEVNET}"
+			local chain_id_beacond=$(jq -r '.clienttoml.chain_id' "${config_json_path}")
+
+			local wallet_address=$(jq -r '.wallet_address' "${config_json_path}")
+			local wallet_private_key=$(jq -r '.wallet_private_key' "${config_json_path}")
+			local wallet_balance=$(jq -r '.wallet_balance' "${config_json_path}")
+
+			# get all seeds and peers
+			local seeds=()
+			local peers=()
+			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+				local json=$(echo "${nodes}" | jq -r ".[$node_index]")
+				local id=$(echo "${json}" | jq -r '.node_id')
+				seeds[${node_index}]="${id}"
+				peers[${node_index}]="${id}"
+			done
+
+			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+				echo "--------------------------------"
+				echo "Configuring node $node_index"
+				echo "--------------------------------"
+
+				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
+				local role=$(echo "${node_json}" | jq -r '.role')
+				local moniker=$(echo "${node_json}" | jq -r '.moniker')
+				local node_key_type=$(echo "${node_json}" | jq -r '.node_key.priv_key.type')
+				local node_key_value=$(echo "${node_json}" | jq -r '.node_key.priv_key.value')
+				local node_id=$(echo "${node_json}" | jq -r '.node_id')
+				local priv_validator_key_address=$(echo "${node_json}" | jq -r '.priv_validator_key.address')
+				local priv_validator_key_pubkey_type=$(echo "${node_json}" | jq -r '.priv_validator_key.pub_key.type')
+				local priv_validator_key_pubkey_value=$(echo "${node_json}" | jq -r '.priv_validator_key.pub_key.value')
+				local priv_validator_key_privkey_type=$(echo "${node_json}" | jq -r '.priv_validator_key.priv_key.type')
+				local priv_validator_key_privkey_value=$(echo "${node_json}" | jq -r '.priv_validator_key.priv_key.value')
+				local premined_deposit=$(echo "${node_json}" | jq -r '.premined_deposit')
+				local deposit_amount=$(echo "${node_json}" | jq -r '.deposit_amount')
+				local jwt=$(echo "${node_json}" | jq -r '.jwt')
+				local comet_address=$(echo "${node_json}" | jq -r '.comet_address')
+				local comet_pubkey=$(echo "${node_json}" | jq -r '.comet_pubkey')
+				local eth_beacon_pubkey=$(echo "${node_json}" | jq -r '.eth_beacon_pubkey')
+
+				# ports
+				local ethrpc_port=$(echo "${node_json}" | jq -r '.ethrpc_port')
+				local ethp2p_port=$(echo "${node_json}" | jq -r '.ethp2p_port')
+				local ethproxy_port=$(echo "${node_json}" | jq -r '.ethproxy_port')
+				local el_ethrpc_port=$(echo "${node_json}" | jq -r '.el_ethrpc_port')
+				local el_authrpc_port=$(echo "${node_json}" | jq -r '.el_authrpc_port')
+				local el_eth_port=$(echo "${node_json}" | jq -r '.el_eth_port')
+				local el_prometheus_port=$(echo "${node_json}" | jq -r '.el_prometheus_port')
+				local cl_prometheus_port=$(echo "${node_json}" | jq -r '.cl_prometheus_port')
+				local beacond_node_port=$(echo "${node_json}" | jq -r '.beacond_node_port')
+
+				# client.toml variables
+				local clienttoml_chain_id=$(jq -r '.clienttoml.chain_id' "${config_json_path}")
+				local clienttoml_keyring_backend=$(jq -r '.clienttoml.keyring_backend' "${config_json_path}")
+				local clienttoml_keyring_default_keyname=$(jq -r '.clienttoml.keyring_default_keyname' "${config_json_path}")
+				local clienttoml_output=$(jq -r '.clienttoml.output' "${config_json_path}")
+				local clienttoml_node=$(jq -r '.clienttoml.node' "${config_json_path}")
+				local clienttoml_broadcast_mode=$(jq -r '.clienttoml.broadcast_mode' "${config_json_path}")
+				local clienttoml_grpc_address=$(jq -r '.clienttoml.grpc_address' "${config_json_path}")
+				local clienttoml_grpc_insecure=$(jq -r '.clienttoml.grpc_insecure' "${config_json_path}")
+
+				# app.toml variables
+				local apptoml_pruning=$(jq -r '.apptoml.pruning' "${config_json_path}")
+				local apptoml_pruning_keep_recent=$(jq -r '.apptoml.pruning_keep_recent' "${config_json_path}")
+				local apptoml_pruning_interval=$(jq -r '.apptoml.pruning_interval' "${config_json_path}")
+				local apptoml_halt_height=$(jq -r '.apptoml.halt_height' "${config_json_path}")
+				local apptoml_halt_time=$(jq -r '.apptoml.halt_time' "${config_json_path}")
+				local apptoml_min_retain_blocks=$(jq -r '.apptoml.min_retain_blocks' "${config_json_path}")
+				local apptoml_inter_block_cache=$(jq -r '.apptoml.inter_block_cache' "${config_json_path}")
+				local apptoml_iavl_cache_size=$(jq -r '.apptoml.iavl_cache_size' "${config_json_path}")
+				local apptoml_iavl_disable_fastnode=$(jq -r '.apptoml.iavl_disable_fastnode' "${config_json_path}")
+				local apptoml_telemetry_service_name=$(jq -r '.apptoml.telemetry_service_name' "${config_json_path}")
+				local apptoml_telemetry_enabled=$(jq -r '.apptoml.telemetry_enabled' "${config_json_path}")
+				local apptoml_telemetry_enable_hostname=$(jq -r '.apptoml.telemetry_enable_hostname' "${config_json_path}")
+				local apptoml_telemetry_enable_hostname_label=$(jq -r '.apptoml.telemetry_enable_hostname_label' "${config_json_path}")
+				local apptoml_telemetry_enable_service_label=$(jq -r '.apptoml.telemetry_enable_service_label' "${config_json_path}")
+				local apptoml_telemetry_prometheus_retention_time=$(jq -r '.apptoml.telemetry_prometheus_retention_time' "${config_json_path}")
+				local apptoml_telemetry_global_labels=$(jq -r '.apptoml.telemetry_global_labels' "${config_json_path}")
+				local apptoml_telemetry_metrics_sink=$(jq -r '.apptoml.telemetry_metrics_sink' "${config_json_path}")
+				local apptoml_telemetry_statsd_addr=$(jq -r '.apptoml.telemetry_statsd_addr' "${config_json_path}")
+				local apptoml_telemetry_datadog_hostname=$(jq -r '.apptoml.telemetry_datadog_hostname' "${config_json_path}")
+				local apptoml_beacon_kit_chain_spec=$(jq -r '.apptoml.beacon_kit_chain_spec' "${config_json_path}")
+				local apptoml_beacon_kit_chain_spec_file=$(jq -r '.apptoml.beacon_kit_chain_spec_file' "${config_json_path}")
+				local apptoml_beacon_kit_shutdown_timeout=$(jq -r '.apptoml.beacon_kit_shutdown_timeout' "${config_json_path}")
+				local apptoml_beacon_kit_engine_rpc_dial_url=$(jq -r '.apptoml.beacon_kit_engine_rpc_dial_url' "${config_json_path}")
+				local apptoml_beacon_kit_engine_rpc_timeout=$(jq -r '.apptoml.beacon_kit_engine_rpc_timeout' "${config_json_path}")
+				local apptoml_beacon_kit_engine_rpc_startup_check_interval=$(jq -r '.apptoml.beacon_kit_engine_rpc_startup_check_interval' "${config_json_path}")
+				local apptoml_beacon_kit_engine_rpc_jwt_refresh_interval=$(jq -r '.apptoml.beacon_kit_engine_rpc_jwt_refresh_interval' "${config_json_path}")
+				local apptoml_beacon_kit_engine_jwt_secret_path=$(jq -r '.apptoml.beacon_kit_engine_jwt_secret_path' "${config_json_path}")
+				local apptoml_beacon_kit_logger_time_format=$(jq -r '.apptoml.beacon_kit_logger_time_format' "${config_json_path}")
+				local apptoml_beacon_kit_logger_log_level=$(jq -r '.apptoml.beacon_kit_logger_log_level' "${config_json_path}")
+				local apptoml_beacon_kit_logger_style=$(jq -r '.apptoml.beacon_kit_logger_style' "${config_json_path}")
+				local apptoml_beacon_kit_kzg_trusted_setup_path=$(jq -r '.apptoml.beacon_kit_kzg_trusted_setup_path' "${config_json_path}")
+				local apptoml_beacon_kit_kzg_implementation=$(jq -r '.apptoml.beacon_kit_kzg_implementation' "${config_json_path}")
+				local apptoml_beacon_kit_payload_builder_enabled=$(jq -r '.apptoml.beacon_kit_payload_builder_enabled' "${config_json_path}")
+				local apptoml_beacon_kit_payload_builder_suggested_fee_recipient=$(jq -r '.apptoml.beacon_kit_payload_builder_suggested_fee_recipient' "${config_json_path}")
+				local apptoml_beacon_kit_payload_builder_payload_timeout=$(jq -r '.apptoml.beacon_kit_payload_builder_payload_timeout' "${config_json_path}")
+				local apptoml_beacon_kit_validator_graffiti=$(jq -r '.apptoml.beacon_kit_validator_graffiti' "${config_json_path}")
+				local apptoml_beacon_kit_validator_availability_window=$(jq -r '.apptoml.beacon_kit_validator_availability_window' "${config_json_path}")
+				local apptoml_beacon_kit_node_api_enabled=$(jq -r '.apptoml.beacon_kit_node_api_enabled' "${config_json_path}")
+				local apptoml_beacon_kit_node_api_address=$(jq -r '.apptoml.beacon_kit_node_api_address' "${config_json_path}")
+				local apptoml_beacon_kit_node_api_logging=$(jq -r '.apptoml.beacon_kit_node_api_logging' "${config_json_path}")
+
+				# config.toml variables
+				local configtoml_version=$(jq -r '.configtoml.version' "${config_json_path}")
+				local configtoml_proxy_app=$(jq -r '.configtoml.proxy_app' "${config_json_path}")
+				local configtoml_moniker=$(jq -r '.configtoml.moniker' "${config_json_path}")
+				local configtoml_db_backend=$(jq -r '.configtoml.db_backend' "${config_json_path}")
+				local configtoml_db_dir=$(jq -r '.configtoml.db_dir' "${config_json_path}")
+				local configtoml_log_level=$(jq -r '.configtoml.log_level' "${config_json_path}")
+				local configtoml_log_format=$(jq -r '.configtoml.log_format' "${config_json_path}")
+				local configtoml_genesis_file=$(jq -r '.configtoml.genesis_file' "${config_json_path}")
+				local configtoml_priv_validator_key_file=$(jq -r '.configtoml.priv_validator_key_file' "${config_json_path}")
+				local configtoml_priv_validator_state_file=$(jq -r '.configtoml.priv_validator_state_file' "${config_json_path}")
+				local configtoml_priv_validator_laddr=$(jq -r '.configtoml.priv_validator_laddr' "${config_json_path}")
+				local configtoml_node_key_file=$(jq -r '.configtoml.node_key_file' "${config_json_path}")
+				local configtoml_abci=$(jq -r '.configtoml.abci' "${config_json_path}")
+				local configtoml_filter_peers=$(jq -r '.configtoml.filter_peers' "${config_json_path}")
+				local configtoml_rpc_laddr=$(jq -r '.configtoml.rpc_laddr' "${config_json_path}")
+				local configtoml_rpc_cors_allowed_origins=$(jq -r '.configtoml.rpc_cors_allowed_origins' "${config_json_path}")
+				local configtoml_rpc_cors_allowed_methods=$(jq -r '.configtoml.rpc_cors_allowed_methods' "${config_json_path}")
+				local configtoml_rpc_cors_allowed_headers=$(jq -r '.configtoml.rpc_cors_allowed_headers' "${config_json_path}")
+				local configtoml_rpc_unsafe=$(jq -r '.configtoml.rpc_unsafe' "${config_json_path}")
+				local configtoml_rpc_max_open_connections=$(jq -r '.configtoml.rpc_max_open_connections' "${config_json_path}")
+				local configtoml_rpc_max_subscription_clients=$(jq -r '.configtoml.rpc_max_subscription_clients' "${config_json_path}")
+				local configtoml_rpc_max_subscriptions_per_client=$(jq -r '.configtoml.rpc_max_subscriptions_per_client' "${config_json_path}")
+				local configtoml_rpc_experimental_subscription_buffer_size=$(jq -r '.configtoml.rpc_experimental_subscription_buffer_size' "${config_json_path}")
+				local configtoml_rpc_experimental_websocket_write_buffer_size=$(jq -r '.configtoml.rpc_experimental_websocket_write_buffer_size' "${config_json_path}")
+				local configtoml_rpc_experimental_close_on_slow_client=$(jq -r '.configtoml.rpc_experimental_close_on_slow_client' "${config_json_path}")
+				local configtoml_rpc_timeout_broadcast_tx_commit=$(jq -r '.configtoml.rpc_timeout_broadcast_tx_commit' "${config_json_path}")
+				local configtoml_rpc_max_request_batch_size=$(jq -r '.configtoml.rpc_max_request_batch_size' "${config_json_path}")
+				local configtoml_rpc_max_body_bytes=$(jq -r '.configtoml.rpc_max_body_bytes' "${config_json_path}")
+				local configtoml_rpc_max_header_bytes=$(jq -r '.configtoml.rpc_max_header_bytes' "${config_json_path}")
+				local configtoml_rpc_tls_cert_file=$(jq -r '.configtoml.rpc_tls_cert_file' "${config_json_path}")
+				local configtoml_rpc_tls_key_file=$(jq -r '.configtoml.rpc_tls_key_file' "${config_json_path}")
+				local configtoml_rpc_pprof_laddr=$(jq -r '.configtoml.rpc_pprof_laddr' "${config_json_path}")
+				local configtoml_grpc_laddr=$(jq -r '.configtoml.grpc_laddr' "${config_json_path}")
+				local configtoml_grpc_version_service_enabled=$(jq -r '.configtoml.grpc_version_service_enabled' "${config_json_path}")
+				local configtoml_grpc_block_service_enabled=$(jq -r '.configtoml.grpc_block_service_enabled' "${config_json_path}")
+				local configtoml_grpc_block_results_service_enabled=$(jq -r '.configtoml.grpc_block_results_service_enabled' "${config_json_path}")
+				local configtoml_grpc_privileged_laddr=$(jq -r '.configtoml.grpc_privileged_laddr' "${config_json_path}")
+				local configtoml_grpc_privileged_pruning_service_enabled=$(jq -r '.configtoml.grpc_privileged_pruning_service_enabled' "${config_json_path}")
+				local configtoml_p2p_laddr=$(jq -r '.configtoml.p2p_laddr' "${config_json_path}")
+				local configtoml_p2p_external_address=$(jq -r '.configtoml.p2p_external_address' "${config_json_path}")
+				local configtoml_p2p_seeds=$(jq -r '.configtoml.p2p_seeds' "${config_json_path}")
+				local configtoml_p2p_persistent_peers=$(jq -r '.configtoml.p2p_persistent_peers' "${config_json_path}")
+				local configtoml_p2p_addr_book_file=$(jq -r '.configtoml.p2p_addr_book_file' "${config_json_path}")
+				local configtoml_p2p_addr_book_strict=$(jq -r '.configtoml.p2p_addr_book_strict' "${config_json_path}")
+				local configtoml_p2p_max_num_inbound_peers=$(jq -r '.configtoml.p2p_max_num_inbound_peers' "${config_json_path}")
+				local configtoml_p2p_max_num_outbound_peers=$(jq -r '.configtoml.p2p_max_num_outbound_peers' "${config_json_path}")
+				local configtoml_p2p_unconditional_peer_ids=$(jq -r '.configtoml.p2p_unconditional_peer_ids' "${config_json_path}")
+				local configtoml_p2p_persistent_peers_max_dial_period=$(jq -r '.configtoml.p2p_persistent_peers_max_dial_period' "${config_json_path}")
+				local configtoml_p2p_flush_throttle_timeout=$(jq -r '.configtoml.p2p_flush_throttle_timeout' "${config_json_path}")
+				local configtoml_p2p_max_packet_msg_payload_size=$(jq -r '.configtoml.p2p_max_packet_msg_payload_size' "${config_json_path}")
+				local configtoml_p2p_send_rate=$(jq -r '.configtoml.p2p_send_rate' "${config_json_path}")
+				local configtoml_p2p_recv_rate=$(jq -r '.configtoml.p2p_recv_rate' "${config_json_path}")
+				local configtoml_p2p_pex=$(jq -r '.configtoml.p2p_pex' "${config_json_path}")
+				local configtoml_p2p_seed_mode=$(jq -r '.configtoml.p2p_seed_mode' "${config_json_path}")
+				local configtoml_p2p_private_peer_ids=$(jq -r '.configtoml.p2p_private_peer_ids' "${config_json_path}")
+				local configtoml_p2p_allow_duplicate_ip=$(jq -r '.configtoml.p2p_allow_duplicate_ip' "${config_json_path}")
+				local configtoml_p2p_handshake_timeout=$(jq -r '.configtoml.p2p_handshake_timeout' "${config_json_path}")
+				local configtoml_p2p_dial_timeout=$(jq -r '.configtoml.p2p_dial_timeout' "${config_json_path}")
+				local configtoml_mempool_type=$(jq -r '.configtoml.mempool_type' "${config_json_path}")
+				local configtoml_mempool_recheck=$(jq -r '.configtoml.mempool_recheck' "${config_json_path}")
+				local configtoml_mempool_recheck_timeout=$(jq -r '.configtoml.mempool_recheck_timeout' "${config_json_path}")
+				local configtoml_mempool_broadcast=$(jq -r '.configtoml.mempool_broadcast' "${config_json_path}")
+				local configtoml_mempool_wal_dir=$(jq -r '.configtoml.mempool_wal_dir' "${config_json_path}")
+				local configtoml_mempool_size=$(jq -r '.configtoml.mempool_size' "${config_json_path}")
+				local configtoml_mempool_max_tx_bytes=$(jq -r '.configtoml.mempool_max_tx_bytes' "${config_json_path}")
+				local configtoml_mempool_max_txs_bytes=$(jq -r '.configtoml.mempool_max_txs_bytes' "${config_json_path}")
+				local configtoml_mempool_cache_size=$(jq -r '.configtoml.mempool_cache_size' "${config_json_path}")
+				local configtoml_mempool_keep_invalid_txs_in_cache=$(jq -r '.configtoml.mempool_keep_invalid_txs_in_cache' "${config_json_path}")
+				local configtoml_statesync_enable=$(jq -r '.configtoml.statesync_enable' "${config_json_path}")
+				local configtoml_statesync_rpc_servers=$(jq -r '.configtoml.statesync_rpc_servers' "${config_json_path}")
+				local configtoml_statesync_trust_height=$(jq -r '.configtoml.statesync_trust_height' "${config_json_path}")
+				local configtoml_statesync_trust_hash=$(jq -r '.configtoml.statesync_trust_hash' "${config_json_path}")
+				local configtoml_statesync_trust_period=$(jq -r '.configtoml.statesync_trust_period' "${config_json_path}")
+				local configtoml_statesync_discovery_time=$(jq -r '.configtoml.statesync_discovery_time' "${config_json_path}")
+				local configtoml_statesync_temp_dir=$(jq -r '.configtoml.statesync_temp_dir' "${config_json_path}")
+				local configtoml_statesync_chunk_request_timeout=$(jq -r '.configtoml.statesync_chunk_request_timeout' "${config_json_path}")
+				local configtoml_statesync_chunk_fetchers=$(jq -r '.configtoml.statesync_chunk_fetchers' "${config_json_path}")
+				local configtoml_blocksync_version=$(jq -r '.configtoml.blocksync_version' "${config_json_path}")
+				local configtoml_consensus_wal_file=$(jq -r '.configtoml.consensus_wal_file' "${config_json_path}")
+				local configtoml_consensus_timeout_propose=$(jq -r '.configtoml.consensus_timeout_propose' "${config_json_path}")
+				local configtoml_consensus_timeout_propose_delta=$(jq -r '.configtoml.consensus_timeout_propose_delta' "${config_json_path}")
+				local configtoml_consensus_timeout_prevote=$(jq -r '.configtoml.consensus_timeout_prevote' "${config_json_path}")
+				local configtoml_consensus_timeout_prevote_delta=$(jq -r '.configtoml.consensus_timeout_prevote_delta' "${config_json_path}")
+				local configtoml_consensus_timeout_precommit=$(jq -r '.configtoml.consensus_timeout_precommit' "${config_json_path}")
+				local configtoml_consensus_timeout_precommit_delta=$(jq -r '.configtoml.consensus_timeout_precommit_delta' "${config_json_path}")
+				local configtoml_consensus_timeout_commit=$(jq -r '.configtoml.consensus_timeout_commit' "${config_json_path}")
+				local configtoml_consensus_skip_timeout_commit=$(jq -r '.configtoml.consensus_skip_timeout_commit' "${config_json_path}")
+				local configtoml_consensus_double_sign_check_height=$(jq -r '.configtoml.consensus_double_sign_check_height' "${config_json_path}")
+				local configtoml_consensus_create_empty_blocks=$(jq -r '.configtoml.consensus_create_empty_blocks' "${config_json_path}")
+				local configtoml_consensus_create_empty_blocks_interval=$(jq -r '.configtoml.consensus_create_empty_blocks_interval' "${config_json_path}")
+				local configtoml_consensus_peer_gossip_sleep_duration=$(jq -r '.configtoml.consensus_peer_gossip_sleep_duration' "${config_json_path}")
+				local configtoml_consensus_peer_gossip_intraloop_sleep_duration=$(jq -r '.configtoml.consensus_peer_gossip_intraloop_sleep_duration' "${config_json_path}")
+				local configtoml_consensus_peer_query_maj23_sleep_duration=$(jq -r '.configtoml.consensus_peer_query_maj23_sleep_duration' "${config_json_path}")
+				local configtoml_storage_discard_abci_responses=$(jq -r '.configtoml.storage_discard_abci_responses' "${config_json_path}")
+				local configtoml_storage_experimental_db_key_layout=$(jq -r '.configtoml.storage_experimental_db_key_layout' "${config_json_path}")
+				local configtoml_storage_compact=$(jq -r '.configtoml.storage_compact' "${config_json_path}")
+				local configtoml_storage_compaction_interval=$(jq -r '.configtoml.storage_compaction_interval' "${config_json_path}")
+				local configtoml_storage_pruning_interval=$(jq -r '.configtoml.storage_pruning_interval' "${config_json_path}")
+				local configtoml_storage_pruning_data_companion_enabled=$(jq -r '.configtoml.storage_pruning_data_companion_enabled' "${config_json_path}")
+				local configtoml_storage_pruning_data_companion_initial_block_retain_height=$(jq -r '.configtoml.storage_pruning_data_companion_initial_block_retain_height' "${config_json_path}")
+				local configtoml_storage_pruning_data_companion_initial_block_results_retain_height=$(jq -r '.configtoml.storage_pruning_data_companion_initial_block_results_retain_height' "${config_json_path}")
+				local configtoml_tx_index_indexer=$(jq -r '.configtoml.tx_index_indexer' "${config_json_path}")
+				local configtoml_tx_index_psql_conn=$(jq -r '.configtoml.tx_index_psql_conn' "${config_json_path}")
+				local configtoml_instrumentation_prometheus=$(jq -r '.configtoml.instrumentation_prometheus' "${config_json_path}")
+				local configtoml_instrumentation_prometheus_listen_addr=$(jq -r '.configtoml.instrumentation_prometheus_listen_addr' "${config_json_path}")
+				local configtoml_instrumentation_max_open_connections=$(jq -r '.configtoml.instrumentation_max_open_connections' "${config_json_path}")
+				local configtoml_instrumentation_namespace=$(jq -r '.configtoml.instrumentation_namespace' "${config_json_path}")
+
+				# Make node directories
+				local node_dir="${beranodes_dir}${BERANODES_PATH_NODES}/${role}-${node_index}"
+				local beacond_dir="${node_dir}/beacond"
+				local bera_reth_dir="${node_dir}/bera-reth"
+				mkdir -p "${node_dir}"
+				mkdir -p "${beacond_dir}"
+				mkdir -p "${bera_reth_dir}"
+
+				# Init beacond node
+				${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+
+				# - replace priv_validator_key.json
+				cat >"${beacond_dir}/config/priv_validator_key.json" <<EOF
+{
+  "address": "${priv_validator_key_address}",
+  "pub_key": {
+    "type": "${priv_validator_key_pubkey_type}",
+    "value": "${priv_validator_key_pubkey_value}"
+  },
+  "priv_key": {
+    "type": "${priv_validator_key_privkey_type}",
+    "value": "${priv_validator_key_privkey_value}"
+  }
+}
+EOF
+				# - replace node_key.json
+				cat >"${beacond_dir}/config/node_key.json" <<EOF
+{
+  "priv_key": {
+    "type": "${node_key_type}",
+    "value": "${node_key_value}"
+  }
+}
+EOF
+
+				# - update genesis.json
+				cp -f "${beranodes_dir}/tmp/genesis.json" "${node_dir}/beacond/config/genesis.json"
+
+				# - add jwt.hex
+				cat >"${node_dir}/beacond/config/jwt.hex" <<EOF
+${jwt}
+EOF
+
+				# - update client.toml
+				# chain-id
+				sed "${SED_OPT[@]}" "s|^chain_id = \".*\"|chain_id = \"${chain_id_beacond}\"|" "${node_dir}/beacond/config/client.toml"
+				# keyring-backend
+				sed "${SED_OPT[@]}" "s|^keyring_backend = \".*\"|keyring_backend = \"${clienttoml_keyring_backend}\"|" "${node_dir}/beacond/config/client.toml"
+				# keyring-default-keyname
+				sed "${SED_OPT[@]}" "s|^keyring_default_keyname = \".*\"|keyring_default_keyname = \"${clienttoml_keyring_default_keyname}\"|" "${node_dir}/beacond/config/client.toml"
+				# output
+				sed "${SED_OPT[@]}" "s|^output = \".*\"|output = \"${clienttoml_output}\"|" "${node_dir}/beacond/config/client.toml"
+				# node
+				sed "${SED_OPT[@]}" "s|^node = \".*\"|node = \"tcp://localhost:${ethrpc_port}\"|" "${node_dir}/beacond/config/client.toml"
+				# broadcast-mode
+				sed "${SED_OPT[@]}" "s|^broadcast_mode = \".*\"|broadcast_mode = \"${clienttoml_broadcast_mode}\"|" "${node_dir}/beacond/config/client.toml"
+				# grpc-address
+				sed "${SED_OPT[@]}" "s|^grpc_address = \".*\"|grpc_address = \"${clienttoml_grpc_address}\"|" "${node_dir}/beacond/config/client.toml"
+				# grpc-insecure
+				sed "${SED_OPT[@]}" "s|^grpc_insecure = \".*\"|grpc_insecure = \"${clienttoml_grpc_insecure}\"|" "${node_dir}/beacond/config/client.toml"
+
+				# - update app.toml
+				echo "--------------------------------"
+				echo "app.toml"
+				echo "--------------------------------"
+				# [base]
+				# pruning - TODO - revamp if pruned node
+				sed "${SED_OPT[@]}" "s|^pruning = \".*\"|pruning = \"${apptoml_pruning}\"|" "${node_dir}/beacond/config/app.toml"
+				# pruning-keep-recent
+				sed "${SED_OPT[@]}" "s|^pruning-keep-recent = \".*\"|pruning-keep-recent = \"${apptoml_pruning_keep_recent}\"|" "${node_dir}/beacond/config/app.toml"
+				# pruning-interval
+				sed "${SED_OPT[@]}" "s|^pruning-interval = \".*\"|pruning-interval = \"${apptoml_pruning_interval}\"|" "${node_dir}/beacond/config/app.toml"
+				# halt-height
+				sed "${SED_OPT[@]}" "s|^halt-height = \".*\"|halt-height = \"${apptoml_halt_height}\"|" "${node_dir}/beacond/config/app.toml"
+				# halt-time
+				sed "${SED_OPT[@]}" "s|^halt-time = \".*\"|halt-time = \"${apptoml_halt_time}\"|" "${node_dir}/beacond/config/app.toml"
+				# min-retain-blocks
+				sed "${SED_OPT[@]}" "s|^min-retain-blocks = \".*\"|min-retain-blocks = \"${apptoml_min_retain_blocks}\"|" "${node_dir}/beacond/config/app.toml"
+				# inter-block-cache
+				sed "${SED_OPT[@]}" "s|^inter-block-cache = \".*\"|inter-block-cache = \"${apptoml_inter_block_cache}\"|" "${node_dir}/beacond/config/app.toml"
+				# iavl-cache-size
+				sed "${SED_OPT[@]}" "s|^iavl-cache-size = \".*\"|iavl-cache-size = \"${apptoml_iavl_cache_size}\"|" "${node_dir}/beacond/config/app.toml"
+				# iavl-disable-fastnode
+				sed "${SED_OPT[@]}" "s|^iiavl-disable-fastnode = \".*\"|iiavl-disable-fastnode = \"${apptoml_iavl_disable_fastnode}\"|" "${node_dir}/beacond/config/app.toml"
+				# [telemetry]
+				# service-name
+				sed "${SED_OPT[@]}" "s|^service-name = \".*\"|service-name = \"${apptoml_telemetry_service_name}\"|" "${node_dir}/beacond/config/app.toml"
+				# enabled
+				sed "${SED_OPT[@]}" "70s|^enabled = .*|enabled = ${apptoml_telemetry_enabled}|" "${node_dir}/beacond/config/app.toml"
+				# enable-hostname
+				sed "${SED_OPT[@]}" "s|^enable-hostname = \".*\"|enable-hostname = \"${apptoml_telemetry_enable_hostname}\"|" "${node_dir}/beacond/config/app.toml"
+				# enable-hostname-label
+				sed "${SED_OPT[@]}" "s|^enable-hostname-label = \".*\"|enable-hostname-label = \"${apptoml_telemetry_enable_hostname_label}\"|" "${node_dir}/beacond/config/app.toml"
+				# enable-service-label
+				sed "${SED_OPT[@]}" "s|^enable-service-label = \".*\"|enable-service-label = \"${apptoml_telemetry_enable_service_label}\"|" "${node_dir}/beacond/config/app.toml"
+				# prometheus-retention-time
+				sed "${SED_OPT[@]}" "s|^prometheus-retention-time = \".*\"|prometheus-retention-time = \"${apptoml_telemetry_prometheus_retention_time}\"|" "${node_dir}/beacond/config/app.toml"
+				# global-labels
+				sed "${SED_OPT[@]}" "s|^global-labels = \[.*\]|global-labels = [\n${apptoml_telemetry_global_labels}\n]|" "${node_dir}/beacond/config/app.toml"
+				# metrics-sink
+				sed "${SED_OPT[@]}" "s|^metrics-sink = \".*\"|metrics-sink = \"${apptoml_telemetry_metrics_sink}\"|" "${node_dir}/beacond/config/app.toml"
+				# statsd-addr
+				sed "${SED_OPT[@]}" "s|^statsd-addr = \".*\"|statsd-addr = \"${apptoml_telemetry_statsd_addr}\"|" "${node_dir}/beacond/config/app.toml"
+				# datadog-hostname
+				sed "${SED_OPT[@]}" "s|^datadog-hostname = \".*\"|datadog-hostname = \"${moniker}\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit]
+				# chain-spec
+				sed "${SED_OPT[@]}" "s|^chain-spec = \".*\"|chain-spec = \"${apptoml_beacon_kit_chain_spec}\"|" "${node_dir}/beacond/config/app.toml"
+				# chain-spec-file
+				sed "${SED_OPT[@]}" "s|^chain-spec-file = \".*\"|chain-spec-file = \"${apptoml_beacon_kit_chain_spec_file}\"|" "${node_dir}/beacond/config/app.toml"
+				# shutdown-timeout
+				sed "${SED_OPT[@]}" "s|^shutdown-timeout = \".*\"|shutdown-timeout = \"${apptoml_beacon_kit_shutdown_timeout}\"|" "${node_dir}/beacond/config/app.toml"
+				# rpc-dial-url
+				sed "${SED_OPT[@]}" "s|^rpc-dial-url = \".*\"|rpc-dial-url = \"http://localhost:${el_authrpc_port}\"|" "${node_dir}/beacond/config/app.toml"
+				# rpc-timeout
+				sed "${SED_OPT[@]}" "s|^rpc-timeout = \".*\"|rpc-timeout = \"${apptoml_beacon_kit_engine_rpc_timeout}\"|" "${node_dir}/beacond/config/app.toml"
+				# rpc-startup-check-interval
+				sed "${SED_OPT[@]}" "s|^rpc-startup-check-interval = \".*\"|rpc-startup-check-interval = \"${apptoml_beacon_kit_engine_rpc_startup_check_interval}\"|" "${node_dir}/beacond/config/app.toml"
+				# rpc-jwt-refresh-interval
+				sed "${SED_OPT[@]}" "s|^rpc-jwt-refresh-interval = \".*\"|rpc-jwt-refresh-interval = \"${apptoml_beacon_kit_engine_rpc_jwt_refresh_interval}\"|" "${node_dir}/beacond/config/app.toml"
+				# jwt-secret-path
+				sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"${node_dir}/beacond/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit-logger]
+				# time-format
+				sed "${SED_OPT[@]}" "s|^time-format = \".*\"|time-format = \"${apptoml_beacon_kit_logger_time_format}\"|" "${node_dir}/beacond/config/app.toml"
+				# log-level
+				sed "${SED_OPT[@]}" "s|^log-level = \".*\"|log-level = \"${apptoml_beacon_kit_logger_log_level}\"|" "${node_dir}/beacond/config/app.toml"
+				# log-style
+				sed "${SED_OPT[@]}" "s|^log-style = \".*\"|log-style = \"${apptoml_beacon_kit_logger_style}\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit-kzg]
+				# trusted-setup-path
+				sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"${beranodes_dir}/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				# kzg-implementation
+				sed "${SED_OPT[@]}" "s|^implementation = \".*\"|implementation = \"${apptoml_beacon_kit_kzg_implementation}\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit-payload-builder]
+				# enabled
+				sed "${SED_OPT[@]}" "157s|^enabled = .*|enabled = ${apptoml_beacon_kit_payload_builder_enabled}|" "${node_dir}/beacond/config/app.toml"
+				# suggested-fee-recipient
+				sed "${SED_OPT[@]}" "s|^suggested-fee-recipient = \".*\"|suggested-fee-recipient = \"${wallet_address}\"|" "${node_dir}/beacond/config/app.toml"
+				# payload-timeout
+				sed "${SED_OPT[@]}" "s|^payload-timeout = \".*\"|payload-timeout = \"${apptoml_beacon_kit_payload_builder_payload_timeout}\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit.validator]
+				# graffiti
+				sed "${SED_OPT[@]}" "s|^graffiti = \".*\"|graffiti = \"${moniker}\"|" "${node_dir}/beacond/config/app.toml"
+				# availability-window
+				sed "${SED_OPT[@]}" "s|^availability-window = \".*\"|availability-window = \"${apptoml_beacon_kit_validator_availability_window}\"|" "${node_dir}/beacond/config/app.toml"
+				# [beacon-kit.node-api]
+				# enabled
+				sed "${SED_OPT[@]}" "176s|^enabled = .*|enabled = ${apptoml_beacon_kit_node_api_enabled}|" "${node_dir}/beacond/config/app.toml"
+				# address
+				sed "${SED_OPT[@]}" "183s|^address = \".*\"|address = \"127.0.0.1:${beacond_node_port}\"|" "${node_dir}/beacond/config/app.toml"
+				# logging
+				sed "${SED_OPT[@]}" "s|^logging = \".*\"|logging = \"${apptoml_beacon_kit_node_api_logging}\"|" "${node_dir}/beacond/config/app.toml"
+
+				# - update config.toml
+				echo "--------------------------------"
+				echo "config.toml"
+				echo "--------------------------------"
+				# version
+				sed "${SED_OPT[@]}" "11s|^version = \".*\"|version = \"${configtoml_version}\"|" "${node_dir}/beacond/config/config.toml"
+				# [base]
+				# proxy_app
+				sed "${SED_OPT[@]}" "s|^proxy_app = \".*\"|proxy_app = \"tcp://127.0.0.1:${ethproxy_port}\"|" "${node_dir}/beacond/config/config.toml"
+				# moniker
+				sed "${SED_OPT[@]}" "s|^moniker = \".*\"|moniker = \"${moniker}\"|" "${node_dir}/beacond/config/config.toml"
+				# db_backend
+				sed "${SED_OPT[@]}" "s|^db_backend = \".*\"|db_backend = \"${configtoml_db_backend}\"|" "${node_dir}/beacond/config/config.toml"
+				# db_dir
+				sed "${SED_OPT[@]}" "s|^db_dir = \".*\"|db_dir = \"${node_dir}/beacond/data\"|" "${node_dir}/beacond/config/config.toml"
+				# log_level
+				sed "${SED_OPT[@]}" "s|^log_level = \".*\"|log_level = \"${configtoml_log_level}\"|" "${node_dir}/beacond/config/config.toml"
+				# log_format
+				sed "${SED_OPT[@]}" "s|^log_format = \".*\"|log_format = \"${configtoml_log_format}\"|" "${node_dir}/beacond/config/config.toml"
+				# genesis_file
+				sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"${node_dir}/beacond/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				# priv_validator_key_file
+				sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"${node_dir}/beacond/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				# priv_validator_state_file
+				sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"${node_dir}/beacond/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				# priv_validator_laddr
+				sed "${SED_OPT[@]}" "s|^priv_validator_laddr = \".*\"|priv_validator_laddr = \"${configtoml_priv_validator_laddr}\"|" "${node_dir}/beacond/config/config.toml"
+				# node_key_file
+				sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"${node_dir}/beacond/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				# abci
+				sed "${SED_OPT[@]}" "s|^abci = \".*\"|abci = \"${configtoml_abci}\"|" "${node_dir}/beacond/config/config.toml"
+				# filter_peers
+				sed "${SED_OPT[@]}" "s|^filter_peers = \".*\"|filter_peers = \"${configtoml_filter_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				# [rpc]
+				echo "--------------------------------"
+				echo "config.toml - [rpc]"
+				echo "--------------------------------"
+				# laddr
+				sed "${SED_OPT[@]}" "94s|^laddr = \".*\"|laddr = \"tcp://127.0.0.1:${ethrpc_port}\"|" "${node_dir}/beacond/config/config.toml"
+				# cors_allowed_origins
+				if [ -z "${configtoml_rpc_cors_allowed_origins}" ]; then
+					sed "${SED_OPT[@]}" "s|^cors_allowed_origins = \[.*\]|cors_allowed-origins = []|" "${node_dir}/beacond/config/config.toml"
+				else
+					formatted_cors_allowed_origins="$(format_csv_as_string "${configtoml_rpc_cors_allowed_origins}")"
+					sed "${SED_OPT[@]}" "s|^cors_allowed_origins = \[.*\]|cors_allowed-origins = [${formatted_cors_allowed_origins}]|" "${node_dir}/beacond/config/config.toml"
+				fi
+				# cors_allowed_methods
+				if [ -z "${configtoml_rpc_cors_allowed_methods}" ]; then
+					sed "${SED_OPT[@]}" "s|^cors_allowed_methods = \[.*\]|cors_allowed_methods = []|" "${node_dir}/beacond/config/config.toml"
+				else
+					formatted_cors_allowed_methods="$(format_csv_as_string "${configtoml_rpc_cors_allowed_methods}")"
+					sed "${SED_OPT[@]}" "s|^cors_allowed_methods = \[.*\]|cors_allowed_methods = [${formatted_cors_allowed_methods}]|" "${node_dir}/beacond/config/config.toml"
+				fi
+				# cors_allowed_headers
+				if [ -z "${configtoml_rpc_cors_allowed_headers}" ]; then
+					sed "${SED_OPT[@]}" "s|^cors_allowed_headers = \[.*\]|cors_allowed_headers = []|" "${node_dir}/beacond/config/config.toml"
+				else
+					formatted_cors_allowed_headers="$(format_csv_as_string "${configtoml_rpc_cors_allowed_headers}")"
+					sed "${SED_OPT[@]}" "s|^cors_allowed_headers = \[.*\]|cors_allowed_headers = [${formatted_cors_allowed_headers}]|" "${node_dir}/beacond/config/config.toml"
+				fi
+				# unsafe
+				sed "${SED_OPT[@]}" "s|^unsafe = \".*\"|unsafe = \"${configtoml_rpc_unsafe}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_open_connections
+				sed "${SED_OPT[@]}" "s|^max_open_connections = \".*\"|max_open_connections = \"${configtoml_rpc_max_open_connections}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_subscription_clients
+				sed "${SED_OPT[@]}" "s|^max_subscription_clients = \".*\"|max_subscription_clients = \"${configtoml_rpc_max_subscription_clients}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_subscriptions_per_client
+				sed "${SED_OPT[@]}" "s|^max_subscriptions_per_client = \".*\"|max_subscriptions_per_client = \"${configtoml_rpc_max_subscriptions_per_client}\"|" "${node_dir}/beacond/config/config.toml"
+				# experimental-subscription-buffer-size
+				sed "${SED_OPT[@]}" "s|^experimental_subscription_buffer_size = \".*\"|experimental_subscription_buffer_size = \"${configtoml_rpc_experimental_subscription_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# experimental_websocket_write_buffer_size
+				sed "${SED_OPT[@]}" "s|^experimental_websocket_write_buffer_size = \".*\"|experimental_websocket_write_buffer_size = \"${configtoml_rpc_experimental_websocket_write_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# experimental_close_on_slow_client
+				sed "${SED_OPT[@]}" "s|^experimental_close_on_slow_client = \".*\"|experimental_close_on_slow_client = \"${configtoml_rpc_experimental_close_on_slow_client}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_broadcast_tx_commit
+				sed "${SED_OPT[@]}" "s|^timeout_broadcast_tx_commit = \".*\"|timeout_broadcast_tx_commit = \"${configtoml_rpc_timeout_broadcast_tx_commit}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_request_batch_size
+				sed "${SED_OPT[@]}" "s|^max_request_batch_size = \".*\"|max_request_batch_size = \"${configtoml_rpc_max_request_batch_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_body_bytes
+				sed "${SED_OPT[@]}" "s|^max_body_bytes = \".*\"|max_body_bytes = \"${configtoml_rpc_max_body_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_header_bytes
+				sed "${SED_OPT[@]}" "s|^max_header_bytes = \".*\"|max_header_bytes = \"${configtoml_rpc_max_header_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				# tls_cert_file
+				sed "${SED_OPT[@]}" "s|^tls_cert_file = \".*\"|tls_cert_file = \"${configtoml_rpc_tls_cert_file}\"|" "${node_dir}/beacond/config/config.toml"
+				# tls_key_file
+				sed "${SED_OPT[@]}" "s|^tls_key_file = \".*\"|tls_key_file = \"${configtoml_rpc_tls_key_file}\"|" "${node_dir}/beacond/config/config.toml"
+				# pprof_laddr
+				sed "${SED_OPT[@]}" "s|^pprof_laddr = \".*\"|pprof_laddr = \"${configtoml_rpc_pprof_laddr}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc]
+				echo "--------------------------------"
+				echo "config.toml - [grpc]"
+				echo "--------------------------------"
+				# laddr
+				sed "${SED_OPT[@]}" "137s|^laddr = \".*\"|laddr = \"${configtoml_grpc_laddr}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc.version_service]
+				# enabled
+				sed "${SED_OPT[@]}" "218s|^enabled = \".*\"|enabled = \"${configtoml_grpc_version_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc.block_service]
+				# enabled
+				sed "${SED_OPT[@]}" "222s|^enabled = \".*\"|enabled = \"${configtoml_grpc_block_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc.block_results_service]
+				# enabled
+				sed "${SED_OPT[@]}" "227s|^enabled = \".*\"|enabled = \"${configtoml_grpc_block_results_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc.privileged]
+				# laddr
+				sed "${SED_OPT[@]}" "235s|^laddr = \".*\"|laddr = \"${configtoml_grpc_privileged_laddr}\"|" "${node_dir}/beacond/config/config.toml"
+				# [grpc.privileged.pruning_service]
+				# enabled
+				sed "${SED_OPT[@]}" "248s|^enabled = \".*\"|enabled = \"${configtoml_grpc_privileged_pruning_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				# [p2p]
+				# laddr
+				sed "${SED_OPT[@]}" "256s|^laddr = \".*\"|laddr = \"tcp://0.0.0.0:${ethp2p_port}\"|" "${node_dir}/beacond/config/config.toml"
+				# external_address
+				sed "${SED_OPT[@]}" "s|^external_address = \".*\"|external_address = \"${configtoml_p2p_external_address}\"|" "${node_dir}/beacond/config/config.toml"
+
+				# Adjust seeds and peers to exclude the current node for connections
+				read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[0]}")
+				configtoml_p2p_seeds="$(
+					IFS=,
+					echo "${node_seeds[*]/%/@localhost:${ethp2p_port}}"
+				)"
+
+				read -a node_peers < <(array_exclude_element peers[@] "${peers[0]}")
+				configtoml_p2p_persistent_peers="$(
+					IFS=,
+					echo "${node_peers[*]/%/@localhost:${ethp2p_port}}"
+				)"
+
+				# seeds
+				sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
+				# persistent_peers
+				sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				# addr_book_file
+				sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				# addr_book_strict
+				sed "${SED_OPT[@]}" "s|^addr_book_strict = \".*\"|addr_book_strict = \"${configtoml_p2p_addr_book_strict}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_num_inbound_peers
+				sed "${SED_OPT[@]}" "s|^max_num_inbound_peers = \".*\"|max_num_inbound_peers = \"${configtoml_p2p_max_num_inbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_num_outbound_peers
+				sed "${SED_OPT[@]}" "s|^max_num_outbound_peers = \".*\"|max_num_outbound_peers = \"${configtoml_p2p_max_num_outbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				# unconditional_peer_ids
+				sed "${SED_OPT[@]}" "s|^unconditional_peer_ids = \".*\"|unconditional_peer_ids = \"${configtoml_p2p_unconditional_peer_ids}\"|" "${node_dir}/beacond/config/config.toml"
+				# persistent_peers_max_dial_period
+				sed "${SED_OPT[@]}" "s|^persistent_peers_max_dial_period = \".*\"|persistent_peers_max_dial_period = \"${configtoml_p2p_persistent_peers_max_dial_period}\"|" "${node_dir}/beacond/config/config.toml"
+				# flush_throttle_timeout
+				sed "${SED_OPT[@]}" "s|^flush_throttle_timeout = \".*\"|flush_throttle_timeout = \"${configtoml_p2p_flush_throttle_timeout}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_packet_msg_payload_size
+				sed "${SED_OPT[@]}" "s|^max_packet_msg_payload_size = \".*\"|max_packet_msg_payload_size = \"${configtoml_p2p_max_packet_msg_payload_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# send_rate
+				sed "${SED_OPT[@]}" "s|^send_rate = \".*\"|send_rate = \"${configtoml_p2p_send_rate}\"|" "${node_dir}/beacond/config/config.toml"
+				# recv_rate
+				sed "${SED_OPT[@]}" "s|^recv_rate = \".*\"|recv_rate = \"${configtoml_p2p_recv_rate}\"|" "${node_dir}/beacond/config/config.toml"
+				# pex
+				sed "${SED_OPT[@]}" "s|^pex = \".*\"|pex = \"${configtoml_p2p_pex}\"|" "${node_dir}/beacond/config/config.toml"
+				# seed_mode
+				sed "${SED_OPT[@]}" "s|^seed_mode = \".*\"|seed_mode = \"${configtoml_p2p_seed_mode}\"|" "${node_dir}/beacond/config/config.toml"
+				# private_peer_ids
+				sed "${SED_OPT[@]}" "s|^private_peer_ids = \".*\"|private_peer_ids = \"${configtoml_p2p_private_peer_ids}\"|" "${node_dir}/beacond/config/config.toml"
+				# allow_duplicate_ip
+				sed "${SED_OPT[@]}" "s|^allow_duplicate_ip = \".*\"|allow_duplicate_ip = \"${configtoml_p2p_allow_duplicate_ip}\"|" "${node_dir}/beacond/config/config.toml"
+				# handshake_timeout
+				sed "${SED_OPT[@]}" "s|^handshake_timeout = \".*\"|handshake_timeout = \"${configtoml_p2p_handshake_timeout}\"|" "${node_dir}/beacond/config/config.toml"
+				# dial_timeout
+				sed "${SED_OPT[@]}" "s|^dial_timeout = \".*\"|dial_timeout = \"${configtoml_p2p_dial_timeout}\"|" "${node_dir}/beacond/config/config.toml"
+				# [mempool]
+				echo "--------------------------------"
+				echo "config.toml - [mempool]"
+				echo "--------------------------------"
+				# type
+				sed "${SED_OPT[@]}" "s|^type = \".*\"|type = \"${configtoml_mempool_type}\"|" "${node_dir}/beacond/config/config.toml"
+				# recheck
+				sed "${SED_OPT[@]}" "s|^recheck = \".*\"|recheck = \"${configtoml_mempool_recheck}\"|" "${node_dir}/beacond/config/config.toml"
+				# recheck_timeout
+				sed "${SED_OPT[@]}" "s|^recheck_timeout = \".*\"|recheck_timeout = \"${configtoml_mempool_recheck_timeout}\"|" "${node_dir}/beacond/config/config.toml"
+				# broadcast
+				sed "${SED_OPT[@]}" "s|^broadcast = \".*\"|broadcast = \"${configtoml_mempool_broadcast}\"|" "${node_dir}/beacond/config/config.toml"
+				# wal_dir
+				sed "${SED_OPT[@]}" "s|^wal_dir = \".*\"|wal_dir = \"${configtoml_mempool_wal_dir}\"|" "${node_dir}/beacond/config/config.toml"
+				# size
+				sed "${SED_OPT[@]}" "s|^size = \".*\"|size = \"${configtoml_mempool_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_tx_bytes
+				sed "${SED_OPT[@]}" "s|^max_tx_bytes = \".*\"|max_tx_bytes = \"${configtoml_mempool_max_tx_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_txs_bytes
+				sed "${SED_OPT[@]}" "s|^max_txs_bytes = \".*\"|max_txs_bytes = \"${configtoml_mempool_max_txs_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				# cache_size
+				sed "${SED_OPT[@]}" "s|^cache_size = \".*\"|cache_size = \"${configtoml_mempool_cache_size}\"|" "${node_dir}/beacond/config/config.toml"
+				# keep-invalid-txs-in-cache
+				sed "${SED_OPT[@]}" "s|^keep_invalid_txs_in_cache = \".*\"|keep_invalid_txs_in_cache = \"${configtoml_mempool_keep_invalid_txs_in_cache}\"|" "${node_dir}/beacond/config/config.toml"
+				# [statesync]
+				echo "--------------------------------"
+				echo "config.toml - [statesync]"
+				echo "--------------------------------"
+				# enable
+				sed "${SED_OPT[@]}" "404s|^enable = .*|enable = ${configtoml_statesync_enable}|" "${node_dir}/beacond/config/config.toml"
+				# rpc_servers
+				sed "${SED_OPT[@]}" "s|^rpc_servers = \".*\"|rpc_servers = \"${configtoml_statesync_rpc_servers}\"|" "${node_dir}/beacond/config/config.toml"
+				# trust_height
+				sed "${SED_OPT[@]}" "s|^trust_height = \".*\"|trust_height = \"${configtoml_statesync_trust_height}\"|" "${node_dir}/beacond/config/config.toml"
+				# trust_hash
+				sed "${SED_OPT[@]}" "s|^trust_hash = \".*\"|trust_hash = \"${configtoml_statesync_trust_hash}\"|" "${node_dir}/beacond/config/config.toml"
+				# trust_period
+				sed "${SED_OPT[@]}" "s|^trust_period = \".*\"|trust_period = \"${configtoml_statesync_trust_period}\"|" "${node_dir}/beacond/config/config.toml"
+				# discovery_time
+				sed "${SED_OPT[@]}" "s|^discovery_time = \".*\"|discovery_time = \"${configtoml_statesync_discovery_time}\"|" "${node_dir}/beacond/config/config.toml"
+				# temp_dir
+				sed "${SED_OPT[@]}" "s|^temp_dir = \".*\"|temp_dir = \"${configtoml_statesync_temp_dir}\"|" "${node_dir}/beacond/config/config.toml"
+				# chunk_request_timeout
+				sed "${SED_OPT[@]}" "s|^chunk_request_timeout = \".*\"|chunk_request_timeout = \"${configtoml_statesync_chunk_request_timeout}\"|" "${node_dir}/beacond/config/config.toml"
+				# chunk_fetchers
+				sed "${SED_OPT[@]}" "s|^chunk_fetchers = \".*\"|chunk_fetchers = \"${configtoml_statesync_chunk_fetchers}\"|" "${node_dir}/beacond/config/config.toml"
+				# [blocksync]
+				echo "--------------------------------"
+				echo "config.toml - [blocksync]"
+				echo "--------------------------------"
+				# version
+				sed "${SED_OPT[@]}" "442s|^version = .*|version = \"${configtoml_blocksync_version}\"|" "${node_dir}/beacond/config/config.toml"
+				# [consensus]
+				echo "--------------------------------"
+				echo "config.toml - [consensus]"
+				echo "--------------------------------"
+				# wal_file
+				sed "${SED_OPT[@]}" "s|^wal_file = \".*\"|wal_file = \"${configtoml_consensus_wal_file}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_propose
+				sed "${SED_OPT[@]}" "s|^timeout_propose = \".*\"|timeout_propose = \"${configtoml_consensus_timeout_propose}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_propose_delta
+				sed "${SED_OPT[@]}" "s|^timeout_propose_delta = \".*\"|timeout_propose_delta = \"${configtoml_consensus_timeout_propose_delta}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_prevote
+				sed "${SED_OPT[@]}" "s|^timeout_prevote = \".*\"|timeout_prevote = \"${configtoml_consensus_timeout_prevote}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_prevote_delta
+				sed "${SED_OPT[@]}" "s|^timeout_prevote_delta = \".*\"|timeout_prevote_delta = \"${configtoml_consensus_timeout_prevote_delta}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_precommit
+				sed "${SED_OPT[@]}" "s|^timeout_precommit = \".*\"|timeout_precommit = \"${configtoml_consensus_timeout_precommit}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_precommit_delta
+				sed "${SED_OPT[@]}" "s|^timeout_precommit_delta = \".*\"|timeout_precommit_delta = \"${configtoml_consensus_timeout_precommit_delta}\"|" "${node_dir}/beacond/config/config.toml"
+				# timeout_commit
+				sed "${SED_OPT[@]}" "s|^timeout_commit = \".*\"|timeout_commit = \"${configtoml_consensus_timeout_commit}\"|" "${node_dir}/beacond/config/config.toml"
+				# skip_timeout_commit
+				sed "${SED_OPT[@]}" "s|^skip_timeout_commit = \".*\"|skip_timeout_commit = \"${configtoml_consensus_skip_timeout_commit}\"|" "${node_dir}/beacond/config/config.toml"
+				# double_sign_check_height
+				sed "${SED_OPT[@]}" "s|^double_sign_check_height = \".*\"|double_sign_check_height = \"${configtoml_consensus_double_sign_check_height}\"|" "${node_dir}/beacond/config/config.toml"
+				# create_empty_blocks
+				sed "${SED_OPT[@]}" "s|^create_empty_blocks = \".*\"|create_empty_blocks = \"${configtoml_consensus_create_empty_blocks}\"|" "${node_dir}/beacond/config/config.toml"
+				# create_empty_blocks_interval
+				sed "${SED_OPT[@]}" "s|^create_empty_blocks_interval = \".*\"|create_empty_blocks_interval = \"${configtoml_consensus_create_empty_blocks_interval}\"|" "${node_dir}/beacond/config/config.toml"
+				# peer_gossip_sleep_duration
+				sed "${SED_OPT[@]}" "s|^peer_gossip_sleep_duration = \".*\"|peer_gossip_sleep_duration = \"${configtoml_consensus_peer_gossip_sleep_duration}\"|" "${node_dir}/beacond/config/config.toml"
+				# peer_gossip_intraloop_sleep_duration
+				sed "${SED_OPT[@]}" "s|^peer_gossip_intraloop_sleep_duration = \".*\"|peer_gossip_intraloop_sleep_duration = \"${configtoml_consensus_peer_gossip_intraloop_sleep_duration}\"|" "${node_dir}/beacond/config/config.toml"
+				# peer_query_maj23_sleep_duration
+				sed "${SED_OPT[@]}" "s|^peer_query_maj23_sleep_duration = \".*\"|peer_query_maj23_sleep_duration = \"${configtoml_consensus_peer_query_maj23_sleep_duration}\"|" "${node_dir}/beacond/config/config.toml"
+				# [storage]
+				# discard_abci_responses
+				sed "${SED_OPT[@]}" "s|^discard_abci_responses = \".*\"|discard_abci_responses = \"${configtoml_storage_discard_abci_responses}\"|" "${node_dir}/beacond/config/config.toml"
+				# experimental_db_key_layout
+				sed "${SED_OPT[@]}" "s|^experimental_db_key_layout = \".*\"|experimental_db_key_layout = \"${configtoml_storage_experimental_db_key_layout}\"|" "${node_dir}/beacond/config/config.toml"
+				# compact
+				sed "${SED_OPT[@]}" "s|^compact = \".*\"|compact = \"${configtoml_storage_compact}\"|" "${node_dir}/beacond/config/config.toml"
+				# compaction_interval
+				sed "${SED_OPT[@]}" "s|^compaction_interval = \".*\"|compaction_interval = \"${configtoml_storage_compaction_interval}\"|" "${node_dir}/beacond/config/config.toml"
+				# [storage.pruning]
+				echo "--------------------------------"
+				echo "config.toml - [storage.pruning]"
+				echo "--------------------------------"
+				# interval
+				sed "${SED_OPT[@]}" "s|^interval = \".*\"|interval = \"${configtoml_storage_pruning_interval}\"|" "${node_dir}/beacond/config/config.toml"
+				# [storage.pruning.data_companion]
+				# enabled
+				sed "${SED_OPT[@]}" '537s|^enabled = .*$|enabled = '"${configtoml_storage_pruning_data_companion_enabled}"'|' "${node_dir}/beacond/config/config.toml"
+				# initial_block_retain_height
+				sed "${SED_OPT[@]}" "s|^initial_block_retain_height = \".*\"|initial_block_retain_height = \"${configtoml_storage_pruning_data_companion_initial_block_retain_height}\"|" "${node_dir}/beacond/config/config.toml"
+				# initial_block_results_retain_height
+				sed "${SED_OPT[@]}" "s|^initial_block_results_retain_height = \".*\"|initial_block_results_retain_height = \"${configtoml_storage_pruning_data_companion_initial_block_results_retain_height}\"|" "${node_dir}/beacond/config/config.toml"
+				# [tx_index]
+				# indexer
+				sed "${SED_OPT[@]}" "s|^indexer = \".*\"|indexer = \"${configtoml_tx_index_indexer}\"|" "${node_dir}/beacond/config/config.toml"
+				# psql_conn
+				sed "${SED_OPT[@]}" "s|^psql_conn = \".*\"|psql_conn = \"${configtoml_tx_index_psql_conn}\"|" "${node_dir}/beacond/config/config.toml"
+				# [instrumentation]
+				# prometheus
+				sed "${SED_OPT[@]}" "s|^prometheus = \".*\"|prometheus = \"${cl_prometheus_port}\"|" "${node_dir}/beacond/config/config.toml"
+				# prometheus_listen_addr
+				sed "${SED_OPT[@]}" "s|^prometheus_listen_addr = \".*\"|prometheus_listen_addr = \":${cl_prometheus_port}\"|" "${node_dir}/beacond/config/config.toml"
+				# max_open_connections
+				sed "${SED_OPT[@]}" '588s|^max_open_connections = .*$|max_open_connections = '"${configtoml_instrumentation_max_open_connections}"'|' "${node_dir}/beacond/config/config.toml"
+				# namespace
+				sed "${SED_OPT[@]}" "s|^namespace = \".*\"|namespace = \"${configtoml_instrumentation_namespace}\"|" "${node_dir}/beacond/config/config.toml"
+
+				# Init bera-reth node
+				cp "${beranodes_dir}/tmp/eth-genesis.json" "${bera_reth_dir}/eth-genesis.json"
+				${bin_bera_reth} init \
+					--chain="${bera_reth_dir}/eth-genesis.json" \
+					--datadir="${bera_reth_dir}" \
+					2>/dev/null
+
+				# --full - full archiving
+				# --bootnodes
+				# --trusted-peers
+				# --authrpc.port
+				# --authrpc.jwtsecret
+				# --port
+				# --metrics
+				# --http
+				# --http.addr
+				# --http.port
+				# --ipcpath
+				# --discovery.port
+				# --http.corsdomain
+				# --log.file.directory
+				# --engine.persistence-threshold
+				# --engine.memory-block-buffer-target
+				#
+				# --authrpc.addr 127.0.0.1		\
+				# --authrpc.port $EL_AUTHRPC_PORT		\
+				# --authrpc.jwtsecret $JWT_PATH		\
+				# --port $EL_ETH_PORT			\
+				# --metrics $EL_PROMETHEUS_PORT		\
+				# --http					\
+				# --http.addr 0.0.0.0			\
+				# --http.port $EL_ETHRPC_PORT		\
+				# --ipcpath /tmp/reth.ipc.$EL_ETHRPC_PORT \
+				# --discovery.port $EL_ETH_PORT		\
+				# --http.corsdomain '*'			\
+				# --log.file.directory $LOG_DIR		\
+				# --engine.persistence-threshold 0	\
+				# --engine.memory-block-buffer-target 0
+			done
+
+			# Start the nodes and record their pids
+			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+				# beacond
+				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
+				local moniker=$(echo "${node_json}" | jq -r '.moniker')
+				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${role}-${node_index}"
+				local beacond_dir="${node_dir}/beacond"
+				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-beacond.log" &
+				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-beacond.pid"
+
+				# bera-reth
+				local el_authrpc_port=$(echo "${node_json}" | jq -r '.el_authrpc_port')
+				local el_ws_port=$(echo "${node_json}" | jq -r '.el_ws_port')
+				${bin_bera_reth} node \
+					--chain="${bera_reth_dir}/eth-genesis.json" \
+					--datadir="${bera_reth_dir}" \
+					--authrpc.addr="127.0.0.1" \
+					--authrpc.port="${el_authrpc_port}" \
+					--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
+					--port="${el_eth_port}" \
+					--engine.persistence-threshold=0 \
+					--engine.memory-block-buffer-target=0 \
+					--http \
+					--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
+					--http.addr=0.0.0.0 \
+					--http.port="${el_ethrpc_port}" \
+					--http.corsdomain=\"*\" \
+					--ws \
+					--ws.addr=0.0.0.0 \
+					--ws.port="${el_ws_port}" \
+					--ws.origins=\"*\" \
+					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-bera-reth.log" &
+				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-bera-reth.pid"
+			done
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")
 			log_error "Unsupported mode: ${mode}"
@@ -7045,6 +7554,101 @@ cmd_start() {
 	# - Bootnodes for peer discovery
 	# - Chain-specific configuration parameters
 	# -------------------------------------------------------------------------
+}
+
+
+# =============================================================================
+# stop
+# Source: commands/stop.sh
+# =============================================================================
+
+show_stop_help() {
+	cat <<EOF
+Usage: beranode stop [OPTIONS]
+
+Stop Berachain nodes already running based on their PIDs in the runs directory.
+
+Options:
+  --beranodes-dir <path>    Specify the beranodes directory path
+                            (default: \$PWD/beranodes)
+  --help|-h                 Display this help message
+
+Examples:
+  beranode stop
+  beranode stop --beranodes-dir /custom/path
+  beranode stop --help
+
+EOF
+}
+
+# =============================================================================
+# [SECTION 2] Main Stop Command Function
+# =============================================================================
+# Primary entry point for the stop command. Orchestrates the entire node
+# stop process from configuration parsing to node stop.
+# =============================================================================
+
+cmd_stop() {
+	# Enable debug output if DEBUG_MODE is set
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: cmd_stop" >&2
+
+	# Parse command line arguments
+	local beranodes_dir="${BERANODES_PATH_DEFAULT}"
+
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		--beranodes-dir)
+			if [[ -z "$2" ]] || [[ "$2" == --* ]]; then
+				log_warn "--beranodes-dir not provided or missing argument. Defaulting to: $beranodes_dir"
+				shift
+			else
+				beranodes_dir="$2"
+				shift 2
+			fi
+			;;
+		--help | -h)
+			show_stop_help
+			return 0
+			;;
+		*)
+			log_error "Unknown option: $1"
+			show_stop_help
+			return 1
+			;;
+		esac
+	done
+
+	# Find runs directory
+	local runs_dir="${beranodes_dir}${BERANODES_PATH_RUNS}"
+	if [[ ! -d "${runs_dir}" ]]; then
+		log_error "Runs directory not found: ${runs_dir}"
+		return 1
+	fi
+
+	# Find all PID files in the runs directory
+	local pid_files=($(find "${runs_dir}" -name "*.pid"))
+	if [[ ${#pid_files[@]} -eq 0 ]]; then
+		log_info "No PID files found in runs directory: ${runs_dir}"
+		return 0
+	fi
+
+	# Stop each node
+	log_info "Stopping nodes in..."
+	log_info "- Runs directory: ${runs_dir}"
+	for pid_file in "${pid_files[@]}"; do
+		local pid=$(cat "${pid_file}")
+		local file=$(basename "${pid_file}")
+		log_info "${file} / PID: ${pid}"
+		if kill "${pid}" 2>/dev/null; then
+			:
+		else
+			log_warn "Failed to stop process with PID: ${pid} (may not exist)"
+		fi
+		# Clean up by removing the PID file
+		rm -f "${pid_file}"
+	done
+
+	log_success "Stopped ${#pid_files[@]} nodes"
 }
 
 
@@ -7104,7 +7708,7 @@ cmd_validate() {
 
 # Show help
 cmd_validate_help() {
-	cat << EOF
+	cat <<EOF
 Validate beranodes configuration file
 
 USAGE:
@@ -7285,6 +7889,12 @@ main() {
 		# Handler: cmd_start() in src/commands/start.sh
 		# Added: v0.1.x, Enhanced: v0.2.1 with --help flag
 		cmd_start "$@"
+		;;
+	stop)
+		# Stop the Berachain node
+		# Handler: cmd_stop() in src/commands/stop.sh
+		# Added: v0.2.1 with --help flag
+		cmd_stop "$@"
 		;;
 	validate)
 		# Validate beranodes configuration file

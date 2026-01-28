@@ -174,6 +174,12 @@ main() {
 		# Added: v0.1.x, Enhanced: v0.2.1 with --help flag
 		cmd_start "$@"
 		;;
+	stop)
+		# Stop the Berachain node
+		# Handler: cmd_stop() in src/commands/stop.sh
+		# Added: v0.2.1 with --help flag
+		cmd_stop "$@"
+		;;
 	validate)
 		# Validate beranodes configuration file
 		# Handler: cmd_validate() in src/commands/validate.sh

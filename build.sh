@@ -177,17 +177,18 @@ EOF
 #   - commands/* depend on all lib modules
 #   - core/dispatcher.sh must come last (orchestrates all commands)
 modules=(
-	"lib/constants.sh"   # [4.1] Core constants and configuration
-	"lib/logging.sh"     # [4.2] Logging utilities
-	"lib/utils.sh"       # [4.3] General utility functions
-	"lib/validation.sh"  # [4.4] Configuration validation utilities
-	"lib/genesis.sh"     # [4.5] Genesis file generation
-	"lib/node.sh"        # [4.6] Node management functions
-	"commands/common.sh" # [4.7] Common command utilities
-	"commands/init.sh"   # [4.8] Init command implementation
-	"commands/start.sh"  # [4.9] Start command implementation
-	"commands/validate.sh" # [4.10] Validate command implementation
-	"core/dispatcher.sh" # [4.11] Main dispatcher and entry point
+	"lib/constants.sh"     # [4.1] Core constants and configuration
+	"lib/logging.sh"       # [4.2] Logging utilities
+	"lib/utils.sh"         # [4.3] General utility functions
+	"lib/validation.sh"    # [4.4] Configuration validation utilities
+	"lib/genesis.sh"       # [4.5] Genesis file generation
+	"lib/node.sh"          # [4.6] Node management functions
+	"commands/common.sh"   # [4.7] Common command utilities
+	"commands/init.sh"     # [4.8] Init command implementation
+	"commands/start.sh"    # [4.9] Start command implementation
+	"commands/stop.sh"     # [4.10] Stop command implementation
+	"commands/validate.sh" # [4.11] Validate command implementation
+	"core/dispatcher.sh"   # [4.12] Main dispatcher and entry point
 )
 
 # Process each module

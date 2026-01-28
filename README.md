@@ -220,6 +220,41 @@ beranodes/
   --wallet-balance 5000000000000000000000000000
 ```
 
+## Testing Your Node
+
+Once your node is running, you can test the RPC endpoints using the following curl commands:
+
+### Test Execution Layer RPC (JSON-RPC)
+
+Check the current block number on the execution layer:
+
+```bash
+curl -s --location 'http://localhost:8545' \
+--header 'Content-Type: application/json' \
+--data '{
+  "jsonrpc": "2.0",
+  "method": "eth_blockNumber",
+  "params": [],
+  "id": 420
+}' | jq;
+```
+
+### Test Consensus Layer RPC (CometBFT)
+
+Check the number of connected peers on the consensus layer:
+
+```bash
+curl -s --location 'http://localhost:26657/net_info' | jq .result.n_peers;
+```
+
+### Test Beacon Node API
+
+Check the latest slot on the beacon node:
+
+```bash
+curl -s --location 'http://localhost:3500/eth/v2/debug/beacon/states/head' | jq .data.latest_block_header.slot;
+```
+
 ## Troubleshooting
 
 ### Check Cast Version

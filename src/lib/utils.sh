@@ -54,6 +54,52 @@ generate_random_name() {
 	echo "${first}-${second}-${third}"
 }
 
+# Removes all occurrences of a given string from a Bash array.
+# Usage:
+#   filtered_array=($(array_exclude_element seeds[@] "hello"))
+# Parameters:
+#   $1 - Name of the array variable (passed as "${array[@]}")
+#   $2 - String value to exclude
+# Returns:
+#   Prints array elements (space-separated), excluding the specified value.
+array_exclude_element() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: array_exclude_element" >&2
+
+	local -a input_array
+	local exclude_value
+	local -a result=()
+
+	# Read input: first arg is (name of) array by reference, second is value to exclude$1
+	input_array=("${!1}")
+	exclude_value="$2"
+
+	for item in "${input_array[@]}"; do
+		if [[ "$item" != "$exclude_value" ]]; then
+			result+=("$item")
+		fi
+	done
+
+	# Return new array (as array, not as string)
+	echo "${result[@]}"
+}
+
+format_csv_as_string() {
+	local origins="$1"
+	local result=""
+	IFS=',' read -ra origins_array <<<"$origins"
+	for origin in "${origins_array[@]}"; do
+		origin_trimmed="$(echo "$origin" | xargs)"
+		if [ -n "$origin_trimmed" ]; then
+			if [ -z "$result" ]; then
+				result="\"$origin_trimmed\""
+			else
+				result="$result,\"$origin_trimmed\""
+			fi
+		fi
+	done
+	echo "$result"
+}
+
 ################################################################################
 # 2. EVM KEY OPERATIONS
 ################################################################################
