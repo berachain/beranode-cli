@@ -91,5 +91,9 @@ cmd_stop() {
 		rm -f "${pid_file}"
 	done
 
+	log_info "Killing any remaining processes..."
+	pkill -f beacond || true
+	pkill -f bera-reth || true
+
 	log_success "Stopped ${#pid_files[@]} nodes"
 }

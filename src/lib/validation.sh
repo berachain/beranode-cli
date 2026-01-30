@@ -213,9 +213,10 @@ validate_node_object() {
 	local network=$(echo "$node_json" | jq -r '.network')
 	local wallet_address=$(echo "$node_json" | jq -r '.wallet_address')
 	local ethrpc_port=$(echo "$node_json" | jq -r '.ethrpc_port')
-	local jwt=$(echo "$node_json" | jq -r '.jwt')
-	local comet_address=$(echo "$node_json" | jq -r '.comet_address')
-	local eth_beacon_pubkey=$(echo "$node_json" | jq -r '.eth_beacon_pubkey')
+	local jwt=$(echo "$node_json" | jq -r '.beacond_config.jwt')
+	local comet_address=$(echo "$node_json" | jq -r '.beacond_config.comet_address')
+	local comet_pubkey=$(echo "$node_json" | jq -r '.beacond_config.comet_pubkey')
+	local eth_beacon_pubkey=$(echo "$node_json" | jq -r '.beacond_config.eth_beacon_pubkey')
 
 	validate_role "$role" || errors+=("Invalid role: $role")
 	validate_moniker "$moniker" || errors+=("Invalid moniker: $moniker")

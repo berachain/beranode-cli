@@ -131,7 +131,7 @@ update_shell_files() {
 			fi
 			rm -f "$file.bak"
 		fi
-	done <<< "$sh_files"
+	done <<<"$sh_files"
 
 	if [[ $updated_count -gt 0 ]]; then
 		echo -e "  ${GREEN}✓${RESET} Updated version strings in $updated_count .sh file(s)"

@@ -3,7 +3,7 @@
 # BERANODE INIT COMMAND
 # =============================================================================
 # File: src/commands/init.sh
-# Version: Compatible with Beranode CLI v0.4.1
+# Version: Compatible with Beranode CLI v0.5.0
 # Description: Initializes Berachain node configurations including validator,
 #              full nodes, and pruned nodes with comprehensive configuration
 #              management for client.toml, app.toml, and config.toml files.
@@ -61,9 +61,9 @@
 #      └─ Generate beacond genesis.json
 #
 # =============================================================================
-# RELATIONSHIP TO CURRENT VERSION (v0.4.1)
+# RELATIONSHIP TO CURRENT VERSION (v0.5.0)
 # =============================================================================
-# This init.sh file is part of the Beranode CLI v0.4.1 and works in
+# This init.sh file is part of the Beranode CLI v0.5.0 and works in
 # conjunction with:
 #
 # - src/lib/constants.sh     : Provides network constants, default ports, and
@@ -101,7 +101,7 @@ GENERAL OPTIONS:
     --validators <count>            Number of validator nodes (default: 1)
     --full-nodes <count>            Number of full nodes (default: 0)
     --pruned-nodes <count>          Number of pruned nodes (default: 0)
-    --docker-mode                   Enable Docker mode
+    --docker                        Enable Docker mode
     --wallet-private-key <key>      Private key for the wallet
     --wallet-address <address>      Wallet address
     --wallet-balance <amount>       Initial wallet balance
@@ -597,9 +597,10 @@ cmd_init() {
 				shift
 			fi
 			;;
-		--docker-mode)
+		--docker)
 			docker_mode=true
 			mode="docker"
+			shift
 			;;
 		--moniker)
 			if [[ -n "$2" ]]; then
@@ -2244,7 +2245,7 @@ cmd_init() {
 	# [7] WALLET GENERATION
 	# =========================================================================
 	# Generate EVM private key and derive wallet address
-
+	# TODO: refactor this so that if an existing wallet is provided, exclude this
 	wallet_private_key=$(generate_evm_private_key)
 	if [[ $? -eq 0 ]]; then
 		log_success "Wallet private key generated:\n${wallet_private_key}"
@@ -2265,7 +2266,7 @@ cmd_init() {
 	# =========================================================================
 	# Create beranodes.config.json with all node configurations
 
-	print_header "Creating Beranode Configuration"
+	print_header "Creating base beranodes.config.json file..."
 
 	# Create beranodes.config.json with settings as JSON
 	config_json_path="${BERANODES_PATH}/beranodes.config.json"
@@ -2297,6 +2298,7 @@ cmd_init() {
 		done
 	fi
 
+	# Create all new setup
 	if [[ "${local_config_exists}" = false ]]; then
 		log_info "Creating new configuration file: ${config_json_path}"
 
@@ -2312,6 +2314,9 @@ cmd_init() {
 		node_cl_prometheus_port=${DEFAULT_CL_PROMETHEUS_PORT}
 		node_beacond_node_port=${DEFAULT_BEACON_NODE_API_PORT}
 		node_port_increment=${DEFAULT_PORT_INCREMENT}
+		#
+		node_configtoml_grpc_laddr="${DEFAULT_GRPC_LADDR_PORT}"
+		node_configtoml_grpc_privileged_laddr="${DEFAULT_GRPC_PRIVILEGED_LADDR_PORT}"
 
 		current_node_ethrpc_port=${node_ethrpc_port}
 		current_node_ethp2p_port=${node_ethp2p_port}
@@ -2323,6 +2328,8 @@ cmd_init() {
 		current_node_el_prometheus_port=${node_el_prometheus_port}
 		current_node_cl_prometheus_port=${node_cl_prometheus_port}
 		current_node_beacond_node_port=${node_beacond_node_port}
+		current_node_configtoml_grpc_laddr=${node_configtoml_grpc_laddr}
+		current_node_configtoml_grpc_privileged_laddr=${node_configtoml_grpc_privileged_laddr}
 
 		if [[ ${validators} -gt 0 ]]; then
 			for i in $(seq 1 ${validators}); do
@@ -2341,7 +2348,9 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					}"
 				else
 					nodes_validators="${nodes_validators}{
@@ -2358,20 +2367,26 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					},"
 				fi
 
-				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
-				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
-				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
-				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
-				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
-				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
-				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
-				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
-				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
-				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
+				if [[ "${docker_mode}" = false ]]; then
+					current_node_ethrpc_port=$((current_node_ethrpc_port + 10000))
+					current_node_ethp2p_port=$((current_node_ethp2p_port + 10000))
+					current_node_ethproxy_port=$((current_node_ethproxy_port + 10000))
+					current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+					current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
+					current_node_el_authrpc_port=$((current_node_el_authrpc_port + 100))
+					current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
+					current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
+					current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + 10000))
+					current_node_beacond_node_port=$((current_node_beacond_node_port + 100))
+					current_node_configtoml_grpc_laddr=$((current_node_configtoml_grpc_laddr + 100))
+					current_node_configtoml_grpc_privileged_laddr=$((current_node_configtoml_grpc_privileged_laddr + 100))
+				fi
 			done
 		fi
 
@@ -2393,7 +2408,9 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					}"
 				else
 					nodes_full_nodes="${nodes_full_nodes}{
@@ -2410,19 +2427,26 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					},"
 				fi
-				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
-				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
-				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
-				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
-				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
-				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
-				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
-				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
-				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
-				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
+
+				if [[ "${docker_mode}" = false ]]; then
+					current_node_ethrpc_port=$((current_node_ethrpc_port + 10000))
+					current_node_ethp2p_port=$((current_node_ethp2p_port + 10000))
+					current_node_ethproxy_port=$((current_node_ethproxy_port + 10000))
+					current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+					current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
+					current_node_el_authrpc_port=$((current_node_el_authrpc_port + 100))
+					current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
+					current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
+					current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + 10000))
+					current_node_beacond_node_port=$((current_node_beacond_node_port + 100))
+					current_node_configtoml_grpc_laddr=$((current_node_configtoml_grpc_laddr + 100))
+					current_node_configtoml_grpc_privileged_laddr=$((current_node_configtoml_grpc_privileged_laddr + 100))
+				fi
 			done
 		fi
 
@@ -2443,7 +2467,9 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					}"
 				else
 					nodes_pruned_nodes="${nodes_pruned_nodes}{
@@ -2459,19 +2485,26 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port}
+            \"beacond_node_port\": ${current_node_beacond_node_port},
+            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					},"
 				fi
-				current_node_ethrpc_port=$((current_node_ethrpc_port + node_port_increment))
-				current_node_ethp2p_port=$((current_node_ethp2p_port + node_port_increment))
-				current_node_ethproxy_port=$((current_node_ethproxy_port + node_port_increment))
-				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
-				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
-				current_node_el_authrpc_port=$((current_node_el_authrpc_port + node_port_increment))
-				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
-				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
-				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + node_port_increment))
-				current_node_beacond_node_port=$((current_node_beacond_node_port + node_port_increment))
+
+				if [[ "${docker_mode}" = false ]]; then
+					current_node_ethrpc_port=$((current_node_ethrpc_port + 10000))
+					current_node_ethp2p_port=$((current_node_ethp2p_port + 10000))
+					current_node_ethproxy_port=$((current_node_ethproxy_port + 10000))
+					current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
+					current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
+					current_node_el_authrpc_port=$((current_node_el_authrpc_port + 100))
+					current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
+					current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
+					current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + 10000))
+					current_node_beacond_node_port=$((current_node_beacond_node_port + 100))
+					current_node_configtoml_grpc_laddr=$((current_node_configtoml_grpc_laddr + 100))
+					current_node_configtoml_grpc_privileged_laddr=$((current_node_configtoml_grpc_privileged_laddr + 100))
+				fi
 			done
 		fi
 
@@ -2489,17 +2522,6 @@ cmd_init() {
 				fi
 			fi
 		done
-
-		# for group in "${all_groups[@]}"; do
-		#   if [[ -n "$group" ]]; then
-		#     # Each group is a comma-separated string of JSON node objects.
-		#     # To safely extract moniker values, iterate through each node object in the string.
-		#     # Remove potential trailing commas and wrap with brackets to form a valid JSON array.
-		#     group_json="[$(echo "$group" | sed 's/,$//')]"
-		#     # Use jq to extract each moniker.
-		#     echo "$group_json" | jq -r '.[].moniker'
-		#   fi
-		# done
 
 		clienttoml="{
       \"chain_id\": \"${clienttoml_chain_id}\",
@@ -2714,37 +2736,38 @@ cmd_init() {
 			log_error "Could not write configuration to ${config_json_path}"
 			return 1
 		fi
-	fi
 
-	# =========================================================================
-	# [9] GENESIS FILE SETUP
-	# =========================================================================
-	# Download kzg-trusted-setup.json and generate eth-genesis.json
+		# =========================================================================
+		# [9] KZG TRUSTED SETUP FILE SETUP
+		# =========================================================================
+		# Download kzg-trusted-setup.json and generate eth-genesis.json
 
-	# Check if kzg-trusted-setup.json exists, otherwise download it
-	if [[ ! -f "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" ]]; then
-		log_info "Downloading kzg-trusted-setup.json to ${BERANODES_PATH}/tmp"
-		echo "$REPO_BEACONKIT/kzg-trusted-setup.json"
-		curl -s -o "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" "$REPO_BEACONKIT/kzg-trusted-setup.json"
-		if [[ $? -eq 0 ]]; then
-			log_success "Downloaded kzg-trusted-setup.json successfully."
+		# Check if kzg-trusted-setup.json exists, otherwise download it
+		if [[ ! -f "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" ]]; then
+			log_info "Downloading kzg-trusted-setup.json to ${BERANODES_PATH}/tmp"
+			echo "$REPO_BEACONKIT/kzg-trusted-setup.json"
+			curl -s -o "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" "$REPO_BEACONKIT/kzg-trusted-setup.json"
+			if [[ $? -eq 0 ]]; then
+				log_success "Downloaded kzg-trusted-setup.json successfully."
+			else
+				log_error "Failed to download kzg-trusted-setup.json."
+				return 1
+			fi
 		else
-			log_error "Failed to download kzg-trusted-setup.json."
-			return 1
+			log_info "kzg-trusted-setup.json already exists in ${BERANODES_PATH}/tmp"
 		fi
-	else
-		log_info "kzg-trusted-setup.json already exists in ${BERANODES_PATH}/tmp"
-	fi
 
-	# Generate eth-genesis.json file
-	if [[ -f "${BERANODES_PATH}/tmp/eth-genesis.json" ]]; then
-		log_success "Found eth-genesis.json at ${BERANODES_PATH}/tmp/eth-genesis.json"
-	else
-		log_warn "eth-genesis.json not found at ${BERANODES_PATH}/tmp/eth-genesis.json creating it..."
+		# =========================================================================
+		# [10] GENESIS FILE SETUP
+		# =========================================================================
+		# Step 1: Generate base beranodes.config.json file
+		generate_base_beacond_config \
+			--config-dir "${BERANODES_PATH}" \
+			--chain-spec "${network}"
 
-		# Generates a eth-genesis.json file that is shared with all nodes
+		# Step 2: Generates a eth-genesis.json file that is shared with all nodes
 		generate_eth_genesis_file \
-			--genesis-file-path "${BERANODES_PATH}/tmp/eth-genesis.json" \
+			--config-dir "${BERANODES_PATH}" \
 			--chain-id "${CHAIN_ID_DEVNET}" \
 			--prague1-time ${ETH_GENESIS_PRAGUE1_TIME} \
 			--prague1-base-fee-change-denominator ${ETH_GENESIS_PRAGUE1_BASE_FEE_CHANGE_DENOMINATOR} \
@@ -2759,20 +2782,10 @@ cmd_init() {
 			--prague4-time ${ETH_GENESIS_PRAGUE4_TIME} \
 			--eth-genesis-custom0-contract-address ${wallet_address} \
 			--eth-genesis-custom0-contract-balance ${wallet_balance}
+
+		# Step X: Generate beacon-kit genesis.json, configured premined deposits and deposit storage in eth-genesis.json
+		generate_beacond_genesis_file_and_premined_deposits_storage \
+			--config-dir "${BERANODES_PATH}" \
+			--chain-spec "${network}"
 	fi
-
-	# =========================================================================
-	# [10] BEACOND INITIALIZATION
-	# =========================================================================
-	# Generate beacond keys and genesis.json for the selected network
-
-	# Generate private and public keys for nodes
-	generate_beacond_keys \
-		--config-dir "${BERANODES_PATH}" \
-		--chain-spec "${network}"
-
-	# Generate beacon-kit genesis.json file
-	generate_beacond_genesis \
-		--config-dir "${BERANODES_PATH}" \
-		--chain-spec "${network}"
 }

@@ -7,16 +7,11 @@
 #
 # LEGEND - Function Overview:
 # [1] generate_eth_genesis_file    - Creates Ethereum execution layer genesis.json
-# [2] generate_beacond_keys        - Generates validator keys for consensus layer
+# [2] generate_base_beranodes_config        - Generates validator keys for consensus layer
 # [3] generate_genesis_file        - Creates basic beacon chain genesis file
 # [4] generate_beacond_genesis     - Comprehensive beacon genesis with deposits
-# [5] create_validator_node        - Configures complete validator node setup
 #
-# WORKFLOW:
-# init → generate_eth_genesis_file → generate_beacond_keys →
-#        generate_beacond_genesis → create_validator_node → start
-#
-# VERSION CONTEXT (v0.4.1):
+# VERSION CONTEXT (v0.5.0):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)
@@ -59,7 +54,8 @@ generate_eth_genesis_file() {
 	#   - 80069: Berachain bepolia testnet
 	#   - 80094: Berachain mainnet
 	# -------------------------------------------------------------------------
-	local genesis_file_path=""
+	local config_dir="${BERANODES_PATH_DEFAULT}"
+	local genesis_file_path="${BERANODES_PATH_DEFAULT}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 	local chain_id="$CHAIN_ID_DEVNET" # Default: Berachain devnet chain ID
 	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 
@@ -301,8 +297,13 @@ generate_eth_genesis_file() {
 	while [[ $# -gt 0 ]]; do
 		key="$1"
 		case $key in
-		--genesis-file-path)
-			genesis_file_path="$2"
+		--config-dir)
+			config_dir="$2"
+			if [[ ! -d "$config_dir" ]]; then
+				config_dir="${BERANODES_PATH_DEFAULT}"
+				genesis_file_path="${BERANODES_PATH_DEFAULT}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
+				log_warn "Config directory not found at $config_dir, using default directory ${BERANODES_PATH_DEFAULT}"
+			fi
 			shift 2
 			;;
 		--chain-id)
@@ -718,16 +719,10 @@ generate_eth_genesis_file() {
 	else
 		echo "eth_genesis_custom_contract_address: (unset)"
 	fi
-	# TESTING
-	# echo "eth_genesis_custom_contract_nonce: ${eth_genesis_custom_contract_nonce[0]}"
-	# echo "eth_genesis_custom_contract_code: ${eth_genesis_custom_contract_code[0]}"
-	# echo "eth_genesis_custom_contract_balance: ${eth_genesis_custom_contract_balance[0]}"
-	# echo "eth_genesis_custom_contract_storage: ${eth_genesis_custom_contract_storage[0]}"
-	# exit 1
 
 	# Check for required arguments
 	if [[ -z "$genesis_file_path" ]]; then
-		log_error "Missing required flag: --genesis-file-path"
+		log_error "Missing eth genesis file ${GENESIS_ETH_NAME_DEFAULT} at ${genesis_file_path}"
 		return 1
 	fi
 
@@ -829,6 +824,7 @@ generate_eth_genesis_file() {
 	# Each contract includes: address, balance, nonce, code, and optional storage
 	# -------------------------------------------------------------------------
 	_build_contracts_alloc() {
+		# ! DO NOT add DEBUG_MODE here
 		local contract_alloc_lines=()
 		local indent='    '
 
@@ -951,6 +947,7 @@ generate_eth_genesis_file() {
 	# with full flexibility for address, balance, nonce, code, and storage.
 	# -------------------------------------------------------------------------
 	_build_custom_alloc() {
+		# ! DO NOT add DEBUG_MODE here
 		local contract_custom_alloc_lines=()
 		local indent='    '
 		local contract_custom_alloc_count=${#eth_genesis_custom_contract_address[@]}
@@ -1010,9 +1007,9 @@ generate_eth_genesis_file() {
 				fi
 
 				# Remove trailing comma if present before closing } (optional for improved JSON validity)
-				if [[ "${contract_custom_alloc_lines[-1]}" =~ ,$ ]]; then
-					contract_custom_alloc_lines[-1]="${contract_custom_alloc_lines[-1]%,}"
-				fi
+				# if [[ "${contract_custom_alloc_lines[-1]}" =~ ,$ ]]; then
+				# 	contract_custom_alloc_lines[-1]="${contract_custom_alloc_lines[-1]%,}"
+				# fi
 				if [[ $index -lt $((contract_custom_alloc_count - 1)) ]]; then
 					contract_custom_alloc_lines+=("${indent}},")
 				else
@@ -1095,7 +1092,7 @@ $(_eth_genesis_build_berachain_section)
   "parentHash": "${genesis_parent_hash}",
   "timestamp": "${genesis_timestamp}",
   "alloc": {
-$(_build_contracts_alloc)$(_build_custom_alloc)
+    $(_build_contracts_alloc)$(_build_custom_alloc)
   }
 }
 EOF
@@ -1109,17 +1106,16 @@ EOF
 	if [[ -f "${genesis_file_path}" ]]; then
 		if jq . "${genesis_file_path}" >"${genesis_file_path}.formatted" 2>/dev/null; then
 			mv "${genesis_file_path}.formatted" "${genesis_file_path}"
-			log_success "eth-genesis.json at ${genesis_file_path} is valid JSON and has been formatted with jq."
+			log_success "${GENESIS_ETH_NAME_DEFAULT} at ${genesis_file_path} is valid JSON and has been formatted with jq."
 		else
-			log_error "eth-genesis.json at ${genesis_file_path} is not valid JSON or is corrupted."
+			log_error "${GENESIS_ETH_NAME_DEFAULT} at ${genesis_file_path} is not valid JSON or is corrupted."
 			rm -f "${genesis_file_path}.formatted"
 			return 1
 		fi
 	else
-		log_error "eth-genesis.json does not exist at ${genesis_file_path}."
+		log_error "${GENESIS_ETH_NAME_DEFAULT} does not exist at ${genesis_file_path}."
 		return 1
 	fi
-
 }
 
 # =============================================================================
@@ -1145,11 +1141,11 @@ EOF
 #   - Creates temporary beacond directory (cleaned up after each node)
 #
 # Usage:
-#   generate_beacond_keys --config-dir /path/to/beranodes \
+#   generate_base_beacond_config --config-dir /path/to/beranodes \
 #                         --chain-spec devnet
 # =============================================================================
-generate_beacond_keys() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_beacond_keys" >&2
+generate_base_beacond_config() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_base_beacond_config" >&2
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id="$3"
@@ -1187,6 +1183,13 @@ generate_beacond_keys() {
 		esac
 	done
 
+	# Check if bin/bera-reth exists in ${config_dir}/bin and is executable
+	local bera_reth_binary="${config_dir}/bin/bera-reth"
+	if [[ ! -x "${bera_reth_binary}" ]]; then
+		log_error "bera-reth binary not found or not executable at: ${bera_reth_binary}"
+		return 1
+	fi
+
 	# Check if bin/beacond exists in ${config_dir}/bin and is executable
 	local beacond_binary="${config_dir}/bin/beacond"
 	if [[ ! -x "${beacond_binary}" ]]; then
@@ -1205,11 +1208,22 @@ generate_beacond_keys() {
 		log_success "Removed existing beacond directory at ${config_dir}/tmp/beacond"
 	fi
 
+	# Clean up any existing bera-reth directory
+	if [[ -d "${config_dir}/tmp/bera-reth" ]]; then
+		log_info "Removing existing bera-reth directory at ${config_dir}/tmp/bera-reth"
+		rm -rf "${config_dir}/tmp/bera-reth"
+		if [[ $? -ne 0 ]]; then
+			log_error "Failed to remove existing bera-reth directory at ${config_dir}/tmp/bera-reth"
+			return 1
+		fi
+	fi
+
 	beranode_config_file="${config_dir}/beranodes.config.json"
 	if [[ ! -f "${beranode_config_file}" ]]; then
 		log_error "Beranode configuration file not found at ${beranode_config_file}"
 		return 1
 	fi
+
 	# Retrieve all the .nodes from the beranodes.config.json file
 	nodes_json=$(jq -c '.nodes' "${beranode_config_file}")
 	if [[ $? -ne 0 ]] || [[ -z "$nodes_json" ]]; then
@@ -1324,6 +1338,28 @@ generate_beacond_keys() {
 			return 1
 		fi
 
+		# Add bera-reth config
+		# - Placeholder
+		private_key="$(cast wallet new --json | jq -r '.[0].private_key')"
+		public_key="$(cast wallet public-key --private-key ${private_key})"
+		berareth_config="{
+      \"private_key\": \"$(echo "${private_key}" | sed 's/^0x//')\",
+      \"public_key\": \"$(echo "${public_key}" | sed 's/^0x//')\"
+    }"
+
+		# Add beacond config
+		beacond_config="{
+      \"comet_address\": \"$comet_address\",
+      \"comet_pubkey\": \"$comet_pubkey\",
+      \"node_id\": \"$node_id\",
+      \"deposit_amount\": \"$deposit_amount\",
+      \"jwt\": \"$jwt_value\",
+      \"eth_beacon_pubkey\": \"$eth_beacon_pubkey\",
+      \"node_key\": $node_key_json,
+      \"premined_deposit\": $premined_deposit_json,
+      \"priv_validator_key\": $priv_validator_key_json
+    }"
+
 		# Build json object with the validator keys
 		tmp_beranode_config="${beranode_config_file}.tmp"
 		jq --arg idx "$((i))" \
@@ -1336,18 +1372,13 @@ generate_beacond_keys() {
 			--argjson premined_deposit "$premined_deposit_json" \
 			--arg deposit_amount "$deposit_amount" \
 			--arg jwt "$jwt_value" \
+			--argjson berareth_config "$berareth_config" \
+			--argjson beacond_config "$beacond_config" \
 			'
          .nodes |=
            (.[($idx|tonumber)] += {
-              node_key: $node_key,
-              priv_validator_key: $priv_validator_key,
-              comet_address: $comet_address,
-              comet_pubkey: $comet_pubkey,
-              eth_beacon_pubkey: $eth_beacon_pubkey,
-              node_id: $node_id,
-              premined_deposit: $premined_deposit,
-              deposit_amount: $deposit_amount,
-              jwt: $jwt
+              berareth_config: $berareth_config,
+              beacond_config: $beacond_config,
            })
        ' "${beranode_config_file}" >"${tmp_beranode_config}"
 		if [[ $? -ne 0 ]]; then
@@ -1369,179 +1400,6 @@ generate_beacond_keys() {
 
 		log_success "Added node_key to node $((i - 1)) in ${beranode_config_file}"
 	done
-
-	# mkdir -p "${config_dir}/tmp/beacond"
-	# cp ${config_dir}/tmp/beacond/config/genesis.json ${config_dir}/tmp/genesis.json
-	# if [[ $? -ne 0 ]]; then
-	#   log_error "Failed to copy genesis file to ${config_dir}/tmp/genesis.json"
-	#   return 1
-	# fi
-	# log_success "Copied genesis file to ${config_dir}/tmp/genesis.json"
-
-	#   # Generate jwt
-	#   echo "Generating JWT file..."
-	#   local jwt_file="${config_dir}/tmp/jwt.hex"
-	#   if [ -f "${jwt_file}" ]; then
-	#     log_info "JWT file already exists at ${jwt_file}"
-	#   else
-	#     ${beacond_binary} >/dev/null 2>&1 jwt generate -o ${jwt_file}
-	#     if [[ $? -ne 0 ]]; then
-	#         log_error "Failed to generate JWT file at ${jwt_file}"
-	#         return 1
-	#     fi
-	#   fi
-}
-
-# =============================================================================
-# [3] GENERATE BASIC GENESIS FILE
-# =============================================================================
-# Creates a basic beacon chain genesis.json file using beacond init.
-# This is a simplified version that generates the initial genesis structure
-# without validator deposits or execution payload configuration.
-#
-# Purpose:
-#   - Initialize basic consensus layer genesis structure
-#   - Generate JWT secret for Engine API authentication
-#   - Provide foundation for more complete genesis setup
-#
-# Parameters (via flags):
-#   --config-dir    : Base directory for configuration
-#   --chain-spec    : Network specification (devnet/testnet/mainnet)
-#
-# Outputs:
-#   - tmp/genesis.json: Basic CometBFT genesis file
-#   - tmp/jwt.hex: JWT secret for EL-CL communication
-#
-# Note: This function is simpler than generate_beacond_genesis() and doesn't
-# include validator deposits or execution payload configuration. Use
-# generate_beacond_genesis() for complete genesis setup.
-#
-# Usage:
-#   generate_genesis_file --config-dir /path/to/beranodes \
-#                         --chain-spec devnet
-# =============================================================================
-generate_genesis_file() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_genesis_file" >&2
-	local config_dir="$1"
-	local chain_spec="$2"
-	local chain_id="$3"
-	local moniker="TEMP-MONIKER"
-
-	# Parse flags
-	while [[ $# -gt 0 ]]; do
-		key="$1"
-		case $key in
-		--config-dir)
-			config_dir="$2"
-			shift 2
-			;;
-		--chain-spec)
-			chain_spec="$2"
-			if [[ "$chain_spec" == "${CHAIN_NAME_DEVNET}" ]]; then
-				chain_id="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
-			elif [[ "$chain_spec" == "${CHAIN_NAME_TESTNET}" ]]; then
-				chain_id="${CHAIN_NAME_TESTNET}-beacon-${CHAIN_ID_TESTNET}"
-			elif [[ "$chain_spec" == "${CHAIN_NAME_MAINNET}" ]]; then
-				chain_id="${CHAIN_NAME_MAINNET}-beacon-${CHAIN_ID_MAINNET}"
-			else
-				echo "Unknown chain spec: ${chain_spec}"
-				shift 2
-				return 1
-			fi
-			shift 2
-			;;
-		*)
-			echo "Unknown flag: $1"
-			shift
-			;;
-		esac
-	done
-
-	# Check if bin/beacond exists in ${config_dir}/bin and is executable
-	local beacond_binary="${config_dir}/bin/beacond"
-	if [[ ! -x "${beacond_binary}" ]]; then
-		log_error "beacond binary not found or not executable at: ${beacond_binary}"
-		return 1
-	fi
-
-	# Clean up any existing genesis file
-	if [ -d "${config_dir}/tmp/beacond" ]; then
-		log_info "Removing existing beacond directory at ${config_dir}/tmp/beacond"
-		rm -rf "${config_dir}/tmp/beacond"
-		if [[ $? -ne 0 ]]; then
-			log_error "Failed to remove existing beacond directory at ${config_dir}/tmp/beacond"
-			return 1
-		fi
-		log_success "Removed existing beacond directory at ${config_dir}/tmp/beacond"
-	fi
-
-	# # Check if beacond is working correctly by running `beacond version`
-	# local genesis_file="${config_dir}/tmp/genesis.json"
-	# if [ -f "${genesis_file}" ]; then
-	#   log_info "Genesis file already exists at ${genesis_file}"
-	# else
-	#   ${beacond_binary} >/dev/null 2>&1 init ${moniker} --chain-id ${chain_id} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond;
-	#   if [[ $? -ne 0 ]]; then
-	#     log_error "Failed to generate Genesis file at ${genesis_file}"
-	#     return 1
-	#   fi
-	#   # TEST
-	#   # cp ${config_dir}/tmp/beacond/config/genesis.json ${config_dir}/tmp/beacond/config/genesis.bk.json
-	# fi
-
-	# # Set deposit storage - eth-genesis.json (execution client - bera-reth)
-	# ${beacond_binary} >/dev/null 2>&1 genesis set-deposit-storage ${config_dir}/tmp/eth-genesis.json --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond;
-	# if [[ $? -ne 0 ]]; then
-	#   log_error "Failed to set deposit storage at ${config_dir}/tmp/eth-genesis.json"
-	#   return 1
-	# fi
-	# log_success "Set deposit storage at ${config_dir}/tmp/eth-genesis.json"
-
-	# # Execution payload - genesis.json (consensus client - beacond)
-	# ${beacond_binary} >/dev/null 2>&1 genesis execution-payload ${config_dir}/tmp/eth-genesis.json --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond;
-	# if [[ $? -ne 0 ]]; then
-	#   log_error "Failed to set execution payload at ${config_dir}/tmp/eth-genesis.json"
-	#   return 1
-	# fi
-	# log_success "Set execution payload at ${config_dir}/tmp/eth-genesis.json"
-
-	# Generate jwt
-	echo "Generating JWT file..."
-	local jwt_file="${config_dir}/tmp/jwt.hex"
-	if [ -f "${jwt_file}" ]; then
-		log_info "JWT file already exists at ${jwt_file}"
-	else
-		${beacond_binary} >/dev/null 2>&1 jwt generate -o ${jwt_file}
-		if [[ $? -ne 0 ]]; then
-			log_error "Failed to generate JWT file at ${jwt_file}"
-			return 1
-		fi
-	fi
-
-	echo "Initializing beacond node..."
-	local genesis_file="${config_dir}/tmp/genesis.json"
-	if [ -f "${genesis_file}" ]; then
-		log_info "Genesis file already exists at ${genesis_file}"
-	else
-		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
-		if [[ $? -ne 0 ]]; then
-			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
-			return 1
-		fi
-		cp ${config_dir}/tmp/beacond/config/genesis.json ${config_dir}/tmp/genesis.json
-		if [[ $? -ne 0 ]]; then
-			log_error "Failed to copy genesis file to ${config_dir}/tmp/genesis.json"
-			return 1
-		fi
-		log_success "Copied genesis file to ${config_dir}/tmp/genesis.json"
-	fi
-	log_success "Genesis file created at ${config_dir}/tmp/genesis.json"
-
-	rm -rf "${config_dir}/tmp/beacond"
-	log_success "Removed beacond directory at ${config_dir}/tmp/beacond"
-
-	log_success "Genesis file created at ${config_dir}/tmp/genesis.json"
 }
 
 # =============================================================================
@@ -1581,11 +1439,11 @@ generate_genesis_file() {
 #   - beranodes.config.json: Updated with genesis_deposits and validator_root
 #
 # Usage:
-#   generate_beacond_genesis --config-dir /path/to/beranodes \
+#   generate_beacond_genesis_file_and_premined_deposits_storage --config-dir /path/to/beranodes \
 #                            --chain-spec devnet
 # =============================================================================
-generate_beacond_genesis() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_beacond_genesis" >&2
+generate_beacond_genesis_file_and_premined_deposits_storage() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_beacond_genesis_file_and_premined_deposits_storage" >&2
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id=""
@@ -1630,8 +1488,21 @@ generate_beacond_genesis() {
 		esac
 	done
 
+	# Check if beranodes.config.json file exists in ${config_dir}/tmp/beranodes.config.json
+	if [[ ! -f "${beranode_config_file}" ]]; then
+		log_error "Beranode configuration file not found at ${beranode_config_file}"
+		return 1
+	fi
+
+	# Check for eht-genesis.json file exists in ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}
+	if [[ ! -f "${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" ]]; then
+		log_error "${GENESIS_ETH_NAME_DEFAULT} file not found at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
+		return 1
+	fi
+
 	# Check if existing genesis.json file exists in ${config_dir}/tmp/genesis.json
-	local genesis_file="${config_dir}/tmp/genesis.json"
+	# TODO refactor as a prompt or remove
+	local genesis_file="${config_dir}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
 	if [ -f "${genesis_file}" ]; then
 		log_info "Genesis file already exists at ${genesis_file}"
 	fi
@@ -1643,12 +1514,6 @@ generate_beacond_genesis() {
 		return 1
 	fi
 
-	# Check if beranodes.config.json file exists in ${config_dir}/tmp/beranodes.config.json
-	if [[ ! -f "${beranode_config_file}" ]]; then
-		log_error "Beranode configuration file not found at ${beranode_config_file}"
-		return 1
-	fi
-
 	# Retrieve all the .nodes from the beranodes.config.json file
 	nodes_json=$(jq -c '.nodes' "${beranode_config_file}")
 	if [[ $? -ne 0 ]] || [[ -z "$nodes_json" ]]; then
@@ -1656,8 +1521,6 @@ generate_beacond_genesis() {
 		return 1
 	fi
 	nodes_count=$(echo "$nodes_json" | jq 'length')
-	echo "Number of nodes: $nodes_count"
-	echo "--------------------------------"
 	if [[ "$nodes_count" -eq 0 ]]; then
 		log_error "No nodes found in ${beranode_config_file}, cannot generate beacond genesis file."
 		return 1
@@ -1671,7 +1534,6 @@ generate_beacond_genesis() {
 			moniker=$(echo "$node_json" | jq -r '.moniker')
 			role=$(echo "$node_json" | jq -r '.role')
 			jwt=$(echo "$node_json" | jq -r '.jwt // empty')
-			echo "Validator found: $i - $moniker"
 		fi
 	done
 
@@ -1700,22 +1562,22 @@ generate_beacond_genesis() {
 	deposit_amount=$(echo "$node_json" | jq -r '.deposit_amount // empty')
 
 	# make tmp/beacond directory
-	mkdir -p "${config_dir}/tmp/beacond"
+	mkdir -p "${config_dir}${BERANODES_PATH_TMP}/beacond"
 	if [[ $? -ne 0 ]]; then
-		log_error "Failed to create tmp/beacond directory at ${config_dir}/tmp/beacond"
+		log_error "Failed to create ${BERANODES_PATH_TMP}beacond directory at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 		return 1
 	fi
 
 	# beacond init
 	${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 	if [[ $? -ne 0 ]]; then
-		log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
+		log_error "Failed to initialize beacond node at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 		return 1
 	fi
-	log_success "Initialized beacond node ${i} - ${moniker} at ${config_dir}/tmp/beacond"
+	log_success "Initialized beacond node ${i} - ${moniker} at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 
 	# replace existing node key in the required format
-	node_key_file="${config_dir}/tmp/beacond/config/node_key.json"
+	node_key_file="${config_dir}${BERANODES_PATH_TMP}/beacond/config/node_key.json"
 	cat >"${node_key_file}" <<EOF
 {
 "priv_key": {
@@ -1731,7 +1593,7 @@ EOF
 	log_success "Replaced existing node key at ${node_key_file} in new format"
 
 	# replace priv_validator_key.json in the required format
-	priv_validator_key_file="${config_dir}/tmp/beacond/config/priv_validator_key.json"
+	priv_validator_key_file="${config_dir}${BERANODES_PATH_TMP}/beacond/config/priv_validator_key.json"
 	cat >"${priv_validator_key_file}" <<EOF
 {
 "address": "${priv_validator_key_address}",
@@ -1781,7 +1643,7 @@ EOF
 	log_success "Added kzg-trusted-setup.json config to app.toml at ${app_toml_file}"
 
 	# add premined deposits
-	mkdir -p "${config_dir}/tmp/beacond/config/premined-deposits"
+	mkdir -p "${config_dir}${BERANODES_PATH_TMP}/beacond/config/premined-deposits"
 	# Check if beranodes.config.json has a key called "genesis_deposits" which is an array
 	beranode_config_file="${config_dir}/beranodes.config.json"
 	has_genesis_deposits=$(jq 'has("genesis_deposits") and (.genesis_deposits|type == "array")' "${beranode_config_file}" 2>/dev/null)
@@ -1800,14 +1662,14 @@ EOF
 				node_moniker=$(jq -r ".nodes[${node_idx}].moniker" "${beranode_config_file}")
 
 				# premined deposit
-				preminded_deposit_pubkey=$(echo "$node" | jq -r '.premined_deposit.pubkey // empty')
-				preminded_deposit_credentials=$(echo "$node" | jq -r '.premined_deposit.credentials // empty')
-				preminded_deposit_amount=$(echo "$node" | jq -r '.premined_deposit.amount // empty')
-				preminded_deposit_signature=$(echo "$node" | jq -r '.premined_deposit.signature // empty')
-				preminded_deposit_index=$(echo "$node" | jq -r '.premined_deposit.index // empty')
+				preminded_deposit_pubkey=$(echo "$node" | jq -r '.beacond_config.premined_deposit.pubkey // empty')
+				preminded_deposit_credentials=$(echo "$node" | jq -r '.beacond_config.premined_deposit.credentials // empty')
+				preminded_deposit_amount=$(echo "$node" | jq -r '.beacond_config.premined_deposit.amount // empty')
+				preminded_deposit_signature=$(echo "$node" | jq -r '.beacond_config.premined_deposit.signature // empty')
+				preminded_deposit_index=$(echo "$node" | jq -r '.beacond_config.premined_deposit.index // empty')
 
 				# create a deposit file in "beranodes/tmp/beacond/config/premined-deposits"
-				deposit_file="${config_dir}/tmp/beacond/config/premined-deposits/premined-deposit-${preminded_deposit_pubkey}.json"
+				deposit_file="${config_dir}${BERANODES_PATH_TMP}/beacond/config/premined-deposits/premined-deposit-${preminded_deposit_pubkey}.json"
 				cat >"${deposit_file}" <<EOF
 {
 "pubkey": "${preminded_deposit_pubkey}",
@@ -1820,15 +1682,15 @@ EOF
 			fi
 		done
 
-		${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
+		${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
 		if [[ $? -ne 0 ]]; then
-			log_error "Failed to collect premined deposits at ${config_dir}/tmp/beacond"
+			log_error "Failed to collect premined deposits at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 			return 1
 		fi
-		log_success "Collected premined deposits at ${config_dir}/tmp/beacond"
+		log_success "Collected premined deposits at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 
 		# validate if genesis.json has an key called .app_state.beacon.deposits which is an array and it matches the number of premined deposits
-		genesis_file="${config_dir}/tmp/beacond/config/genesis.json"
+		genesis_file="${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
 		deposits_count=$(jq '.app_state.beacon.deposits | length' "${genesis_file}")
 		if [[ $? -ne 0 ]] || [[ -z "$deposits_count" ]]; then
 			log_error "Failed to read or parse .app_state.beacon.deposits from ${genesis_file}"
@@ -1846,7 +1708,7 @@ EOF
 		fi
 		log_success "Number of premined deposits matches the number of nodes in ${genesis_file}"
 
-		# copy .app_state.beacon.deposits from ${config_dir}/tmp/beacond/config/genesis.json to beranodes.config.json
+		# copy .app_state.beacon.deposits from ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} to beranodes.config.json
 		deposits_json=$(jq -c '.app_state.beacon.deposits' "${genesis_file}")
 		if [[ $? -ne 0 ]] || [[ -z "$deposits_json" ]]; then
 			log_error "Failed to read or parse .app_state.beacon.deposits from ${genesis_file}"
@@ -1856,15 +1718,15 @@ EOF
       .genesis_deposits = $deposits
     ' "${beranode_config_file}" >"${beranode_config_file}.tmp"
 		mv "${beranode_config_file}.tmp" "${beranode_config_file}"
-		log_success "Copied .app_state.beacon.deposits from ${config_dir}/tmp/beacond/config/genesis.json to beranodes.config.json"
+		log_success "Copied .app_state.beacon.deposits from ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} to beranodes.config.json"
 
 		# generate validator root
-		validator_root=$(${beacond_binary} genesis validator-root ${config_dir}/tmp/beacond/config/genesis.json --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+		validator_root=$(${beacond_binary} genesis validator-root ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond)
 		if [[ $? -ne 0 ]] || [[ -z "$validator_root" ]]; then
-			log_error "Failed to generate validator root at ${config_dir}/tmp/beacond/config/genesis.json"
+			log_error "Failed to generate validator root at ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
 			return 1
 		fi
-		log_success "Generated validator root at ${config_dir}/tmp/beacond/config/genesis.json"
+		log_success "Generated validator root at ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
 		echo "Validator root: $validator_root"
 
 		# validator_root to beranodes.config.json
@@ -1875,44 +1737,44 @@ EOF
 		log_success "Replaced validator root in beranodes.config.json"
 
 		# Modifies eth-genesis.json file to set deposit storage
-		# set deposit storage - makes a copy of the eth-genesis.json file to ${config_dir}/tmp/beacond/eth-genesis.json and modifies the 0x4242... storage slots
-		${beacond_binary} genesis set-deposit-storage ${config_dir}/tmp/eth-genesis.json --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
-		if [[ $? -ne 0 ]] || [[ ! -f "${config_dir}/tmp/beacond/eth-genesis.json" ]]; then
-			log_error "Failed to set deposit storage at ${config_dir}/tmp/eth-genesis.json"
+		# set deposit storage - makes a copy of the eth-genesis.json file to ${config_dir}${BERANODES_PATH_TMP}/beacond/eth-genesis.json and modifies the 0x4242... storage slots
+		${beacond_binary} genesis set-deposit-storage ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		if [[ $? -ne 0 ]] || [[ ! -f "${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}" ]]; then
+			log_error "Failed to set deposit storage at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 			return 1
 		fi
 		# cp the json object .alloc.0x4242424242424242424242424242424242424242.storage and replace it with the json object from ${config_dir}/tmp/beacond/eth-genesis.json
-		storage_json=$(jq -c '.alloc."0x4242424242424242424242424242424242424242".storage' "${config_dir}/tmp/beacond/eth-genesis.json")
+		storage_json=$(jq -c '.alloc."0x4242424242424242424242424242424242424242".storage' "${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}")
 		if [[ $? -ne 0 ]] || [[ -z "$storage_json" ]]; then
-			log_error "Failed to read or parse .alloc.\"0x4242424242424242424242424242424242424242\".storage from ${config_dir}/tmp/beacond/eth-genesis.json"
+			log_error "Failed to read or parse .alloc.\"0x4242424242424242424242424242424242424242\".storage from ${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}"
 			return 1
 		fi
 		jq --argjson storage "$storage_json" '
       .alloc."0x4242424242424242424242424242424242424242".storage = $storage
-    ' "${config_dir}/tmp/eth-genesis.json" >"${config_dir}/tmp/eth-genesis.json.tmp"
-		mv "${config_dir}/tmp/eth-genesis.json.tmp" "${config_dir}/tmp/eth-genesis.json"
-		log_success "Replaced .alloc.\"0x4242424242424242424242424242424242424242\".storage in ${config_dir}/tmp/eth-genesis.json"
+    ' "${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" >"${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}.tmp"
+		mv "${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}.tmp" "${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
+		log_success "Replaced .alloc.\"0x4242424242424242424242424242424242424242\".storage in ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 
 		# Modifies genesis.json file to set execution payload
 		# execution payload
-		${beacond_binary} genesis execution-payload ${config_dir}/tmp/eth-genesis.json --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
+		${beacond_binary} genesis execution-payload ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
 		if [[ $? -ne 0 ]]; then
-			log_error "Failed to set execution payload at ${config_dir}/tmp/eth-genesis.json"
+			log_error "Failed to set execution payload at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 			return 1
 		fi
-		log_success "Set execution payload at ${config_dir}/tmp/eth-genesis.json"
+		log_success "Set execution payload at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 
 		# Copy genesis.json to beranodes/tmp/genesis.json
-		cp ${config_dir}/tmp/beacond/config/genesis.json ${config_dir}/tmp/genesis.json
+		cp ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} ${config_dir}${BERANODES_PATH_TMP}/genesis.json
 		if [[ $? -ne 0 ]]; then
-			log_error "Failed to copy genesis.json to tmp/genesis.json"
+			log_error "Failed to copy ${GENESIS_BEACON_NAME_DEFAULT} to ${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
 			return 1
 		fi
-		log_success "Copied genesis.json to tmp/genesis.json"
+		log_success "Copied ${GENESIS_BEACON_NAME_DEFAULT} to ${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
 
 		# Modify beranodes/tmp/genesis.json to add key values of genesis_file and genesis_eth_file
-		jq --arg genesis_file "${config_dir}/tmp/beacond/config/genesis.json" \
-			--arg genesis_eth_file "${config_dir}/tmp/eth-genesis.json" '
+		jq --arg genesis_file "${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}" \
+			--arg genesis_eth_file "${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" '
       .genesis_file = $genesis_file
       | .genesis_eth_file = $genesis_eth_file
     ' "${config_dir}/beranodes.config.json" >"${config_dir}/beranodes.config.json.tmp"
@@ -1921,11 +1783,20 @@ EOF
 	fi
 
 	# Ensure the beacond directory is removed, regardless of its existence
-	rm -rf "${config_dir}/tmp/beacond"
-	if [[ -d "${config_dir}/tmp/beacond" ]]; then
-		log_error "Failed to remove beacond directory at ${config_dir}/tmp/beacond"
+	rm -rf "${config_dir}${BERANODES_PATH_TMP}/beacond"
+	if [[ -d "${config_dir}${BERANODES_PATH_TMP}/beacond" ]]; then
+		log_error "Failed to remove beacond directory at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 		return 1
 	else
-		log_success "Ensured removal of beacond directory at ${config_dir}/tmp/beacond"
+		log_success "Ensured removal of beacond directory at ${config_dir}${BERANODES_PATH_TMP}/beacond"
+	fi
+
+	# Ensure that bera-reth directory is removed, regardless of its existence
+	rm -rf "${config_dir}${BERANODES_PATH_TMP}/bera-reth"
+	if [[ -d "${config_dir}${BERANODES_PATH_TMP}/bera-reth" ]]; then
+		log_error "Failed to remove bera-reth directory at ${config_dir}${BERANODES_PATH_TMP}/bera-reth"
+		return 1
+	else
+		log_success "Ensured removal of bera-reth directory at ${config_dir}${BERANODES_PATH_TMP}/bera-reth"
 	fi
 }

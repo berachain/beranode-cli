@@ -182,7 +182,7 @@ check_cast_version() {
 	fi
 
 	# Extract version from 'cast --version' output
-	# Example output: "cast 0.2.0 (abc123 2024-01-01T00:00:00Z)"
+	# Example output: "cast v0.5.0 (abc123 2024-01-01T00:00:00Z)"
 	# We extract the 3rd field and strip any suffix like "-nightly"
 	cast_version_raw="$(cast --version 2>/dev/null | head -n1 | awk '{print $3}')"
 	cast_version="${cast_version_raw%%-*}" # Strip suffix: "1.2.3-nightly" -> "1.2.3"

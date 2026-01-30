@@ -14,7 +14,7 @@
 # =============================================================================
 # This version is automatically updated by scripts/bump-version.sh
 # Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.4.1"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.5.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
@@ -84,6 +84,8 @@ readonly DEFAULT_CL_PROMETHEUS_PORT=26660
 readonly DEFAULT_PORT_INCREMENT=100
 readonly DEFAULT_WALLET_BALANCE=1000000000000000000000000000
 readonly DEFAULT_BEACON_NODE_API_PORT=3500
+readonly DEFAULT_GRPC_LADDR_PORT=9090
+readonly DEFAULT_GRPC_PRIVILEGED_LADDR_PORT=9091
 
 # =============================================================================
 # Binary Names
@@ -103,7 +105,9 @@ readonly BERANODES_PATH_LOGS="/logs"
 readonly BERANODES_PATH_NODES="/nodes"
 readonly BERANODES_PATH_RUNS="/runs"
 
-readonly SUPPORTED_CAST_VERSION="1.4.3"
+readonly GENESIS_ETH_NAME_DEFAULT="eth-genesis.json"
+readonly GENESIS_BEACON_NAME_DEFAULT="genesis.json"
+readonly SUPPORTED_CAST_VERSION="1.6.0"
 BERANODES_PATH=${BERANODES_PATH:-$(pwd)/beranodes}
 
 # =============================================================================
@@ -282,9 +286,9 @@ readonly APPTOML_BEACON_KIT_VALIDATOR_GRAFFITI=""
 readonly APPTOML_BEACON_KIT_VALIDATOR_AVAILABILITY_WINDOW="8192"
 
 # BeaconKit Node API Configuration
-readonly APPTOML_BEACON_KIT_NODE_API_ENABLED="false"
+readonly APPTOML_BEACON_KIT_NODE_API_ENABLED="true"
 readonly APPTOML_BEACON_KIT_NODE_API_ADDRESS="0.0.0.0:3500"
-readonly APPTOML_BEACON_KIT_NODE_API_LOGGING="false"
+readonly APPTOML_BEACON_KIT_NODE_API_LOGGING="true"
 
 # =============================================================================
 # Default Beacond client.toml - See ./beacond/config/client.toml
@@ -353,7 +357,8 @@ readonly CONFIGTOML_P2P_EXTERNAL_ADDRESS=""
 readonly CONFIGTOML_P2P_SEEDS=""
 readonly CONFIGTOML_P2P_PERSISTENT_PEERS=""
 readonly CONFIGTOML_P2P_ADDR_BOOK_FILE="config/addrbook.json"
-readonly CONFIGTOML_P2P_ADDR_BOOK_STRICT=true
+# must be set to false for multiple nodes on the same machine
+readonly CONFIGTOML_P2P_ADDR_BOOK_STRICT=false
 readonly CONFIGTOML_P2P_MAX_NUM_INBOUND_PEERS=40
 readonly CONFIGTOML_P2P_MAX_NUM_OUTBOUND_PEERS=10
 readonly CONFIGTOML_P2P_UNCONDITIONAL_PEER_IDS=""
@@ -365,7 +370,8 @@ readonly CONFIGTOML_P2P_RECV_RATE=5120000
 readonly CONFIGTOML_P2P_PEX=true
 readonly CONFIGTOML_P2P_SEED_MODE=false
 readonly CONFIGTOML_P2P_PRIVATE_PEER_IDS=""
-readonly CONFIGTOML_P2P_ALLOW_DUPLICATE_IP=false
+# must be set to true for multiple nodes on the same machine
+readonly CONFIGTOML_P2P_ALLOW_DUPLICATE_IP=true
 readonly CONFIGTOML_P2P_HANDSHAKE_TIMEOUT="20s"
 readonly CONFIGTOML_P2P_DIAL_TIMEOUT="3s"
 

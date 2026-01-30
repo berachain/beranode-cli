@@ -238,6 +238,13 @@ curl -s --location 'http://localhost:8545' \
   "id": 420
 }' | jq;
 ```
+### Test Execution Layer RPC For Peers
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"net_peerCount","params":[],"id":1}' \
+  http://localhost:8545
+```
 
 ### Test Consensus Layer RPC (CometBFT)
 
@@ -253,6 +260,12 @@ Check the latest slot on the beacon node:
 
 ```bash
 curl -s --location 'http://localhost:3500/eth/v2/debug/beacon/states/head' | jq .data.latest_block_header.slot;
+
+# [Expected]:
+# null
+# ...
+# "0x3"
+# "0x4"
 ```
 
 ## Troubleshooting

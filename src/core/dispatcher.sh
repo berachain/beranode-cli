@@ -2,7 +2,7 @@
 # Command Dispatcher - Core Routing Module
 # =============================================================================
 #
-# VERSION: 0.2.1 (Current)
+# VERSION: v0.5.0 (Current)
 #
 # PURPOSE:
 #   This module serves as the central command router for the beranode CLI,
@@ -10,8 +10,8 @@
 #   managing the primary control flow of the application.
 #
 # CHANGELOG (Recent):
-#   v0.4.1 - Added --help flag support for init and start commands
-#   v0.4.1 - Implemented semantic versioning (semver) support
+#   v0.5.0 - Added --help flag support for init and start commands
+#   v0.5.0 - Implemented semantic versioning (semver) support
 #   v0.1.x - Added beacond TOML configurations
 #
 # =============================================================================
@@ -149,7 +149,7 @@ main() {
 	# ---------------------------------------------------------------------
 	# [3.1] Help and Version Flags
 	# Handles: -h, --help, help, -v, --version, version
-	# Added in: v0.4.1 with enhanced --help support
+	# Added in: v0.5.0 with enhanced --help support
 	# ---------------------------------------------------------------------
 	-h | --help | help)
 		show_help
@@ -165,25 +165,25 @@ main() {
 	init)
 		# Initialize new node configuration
 		# Handler: cmd_init() in src/commands/init.sh
-		# Added: v0.1.x, Enhanced: v0.4.1 with --help flag
+		# Added: v0.1.x, Enhanced: v0.5.0 with --help flag
 		cmd_init "$@"
 		;;
 	start)
 		# Start the Berachain node
 		# Handler: cmd_start() in src/commands/start.sh
-		# Added: v0.1.x, Enhanced: v0.4.1 with --help flag
+		# Added: v0.1.x, Enhanced: v0.5.0 with --help flag
 		cmd_start "$@"
 		;;
 	stop)
 		# Stop the Berachain node
 		# Handler: cmd_stop() in src/commands/stop.sh
-		# Added: v0.4.1 with --help flag
+		# Added: v0.5.0 with --help flag
 		cmd_stop "$@"
 		;;
 	validate)
 		# Validate beranodes configuration file
 		# Handler: cmd_validate() in src/commands/validate.sh
-		# Added: v0.4.1 with regex-based validation
+		# Added: v0.5.0 with regex-based validation
 		cmd_validate "$@"
 		;;
 

@@ -1,5 +1,5 @@
 # =============================================================================
-# Start Command - Beranode CLI v0.4.1
+# Start Command - Beranode CLI v0.5.0
 # =============================================================================
 # This module implements the 'start' command for the Beranode CLI tool.
 # It orchestrates the startup of Berachain nodes (validators, full nodes, or
@@ -18,7 +18,7 @@
 #
 # VERSION HISTORY:
 # ----------------
-# v0.4.1 - Current version
+# v0.5.0 - Current version
 #        - Added --help command support
 #        - Enhanced version management with semantic versioning
 #        - Improved error handling and validation
@@ -177,6 +177,35 @@ cmd_start() {
 	local nodes=$(jq -r '.nodes' "${config_json_path}")
 	local nodes_count=$(echo "${nodes}" | jq -r '. | length')
 
+	# Get all ports and check if they are currently in use
+	local ports=()
+	for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+		local json=$(echo "${nodes}" | jq -r ".[$node_index]")
+		local ethrpc_port=$(echo "${json}" | jq -r '.ethrpc_port')
+		local ethp2p_port=$(echo "${json}" | jq -r '.ethp2p_port')
+		local ethproxy_port=$(echo "${json}" | jq -r '.ethproxy_port')
+		local el_ethrpc_port=$(echo "${json}" | jq -r '.el_ethrpc_port')
+		local el_authrpc_port=$(echo "${json}" | jq -r '.el_authrpc_port')
+		local el_eth_port=$(echo "${json}" | jq -r '.el_eth_port')
+		local el_prometheus_port=$(echo "${json}" | jq -r '.el_prometheus_port')
+		local cl_prometheus_port=$(echo "${json}" | jq -r '.cl_prometheus_port')
+		local beacond_node_port=$(echo "${json}" | jq -r '.beacond_node_port')
+		local configtoml_grpc_laddr=$(echo "${json}" | jq -r '.configtoml_grpc_laddr')
+		local configtoml_grpc_privileged_laddr=$(echo "${json}" | jq -r '.configtoml_grpc_privileged_laddr')
+		ports[${node_index}]="${ethrpc_port} ${ethp2p_port} ${ethproxy_port} ${el_ethrpc_port} ${el_authrpc_port} ${el_eth_port} ${el_prometheus_port} ${cl_prometheus_port} ${beacond_node_port} ${configtoml_grpc_laddr} ${configtoml_grpc_privileged_laddr}"
+	done
+	log_info "Checking if ports are in use:\n${ports[*]}\n"
+	for port in "${ports[@]}"; do
+		# Only check ports that are numbers, skip empty/invalid ones to avoid "No such file or directory"
+		if [[ "$port" =~ ^[0-9]+$ ]]; then
+			if lsof -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+				log_error "Port ${port} is already in use"
+				return 1
+			fi
+		fi
+	done
+	log_success "All ports are available"
+
 	# -------------------------------------------------------------------------
 	# [DEBUG] Node Configuration Inspection (Currently Disabled)
 	# -------------------------------------------------------------------------
@@ -233,11 +262,19 @@ cmd_start() {
 			# get all seeds and peers
 			local seeds=()
 			local peers=()
+			local p2p_ports=()
+			local berareth_bootnodes=()
+			local berareth_trusted_peers=()
+			local berareth_el_eth_port=()
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
 				local json=$(echo "${nodes}" | jq -r ".[$node_index]")
-				local id=$(echo "${json}" | jq -r '.node_id')
+				local id=$(echo "${json}" | jq -r '.beacond_config.node_id')
 				seeds[${node_index}]="${id}"
 				peers[${node_index}]="${id}"
+				p2p_ports[${node_index}]=$(echo "${json}" | jq -r '.ethp2p_port')
+				berareth_bootnodes[${node_index}]=$(echo "${json}" | jq -r '.berareth_config.public_key')
+				berareth_trusted_peers[${node_index}]=$(echo "${json}" | jq -r '.berareth_config.public_key')
+				berareth_el_eth_port[${node_index}]=$(echo "${json}" | jq -r '.el_eth_port')
 			done
 
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
@@ -248,20 +285,20 @@ cmd_start() {
 				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
 				local role=$(echo "${node_json}" | jq -r '.role')
 				local moniker=$(echo "${node_json}" | jq -r '.moniker')
-				local node_key_type=$(echo "${node_json}" | jq -r '.node_key.priv_key.type')
-				local node_key_value=$(echo "${node_json}" | jq -r '.node_key.priv_key.value')
+				local node_key_type=$(echo "${node_json}" | jq -r '.beacond_config.node_key.priv_key.type')
+				local node_key_value=$(echo "${node_json}" | jq -r '.beacond_config.node_key.priv_key.value')
 				local node_id=$(echo "${node_json}" | jq -r '.node_id')
-				local priv_validator_key_address=$(echo "${node_json}" | jq -r '.priv_validator_key.address')
-				local priv_validator_key_pubkey_type=$(echo "${node_json}" | jq -r '.priv_validator_key.pub_key.type')
-				local priv_validator_key_pubkey_value=$(echo "${node_json}" | jq -r '.priv_validator_key.pub_key.value')
-				local priv_validator_key_privkey_type=$(echo "${node_json}" | jq -r '.priv_validator_key.priv_key.type')
-				local priv_validator_key_privkey_value=$(echo "${node_json}" | jq -r '.priv_validator_key.priv_key.value')
+				local priv_validator_key_address=$(echo "${node_json}" | jq -r '.beacond_config.priv_validator_key.address')
+				local priv_validator_key_pubkey_type=$(echo "${node_json}" | jq -r '.beacond_config.priv_validator_key.pub_key.type')
+				local priv_validator_key_pubkey_value=$(echo "${node_json}" | jq -r '.beacond_config.priv_validator_key.pub_key.value')
+				local priv_validator_key_privkey_type=$(echo "${node_json}" | jq -r '.beacond_config.priv_validator_key.priv_key.type')
+				local priv_validator_key_privkey_value=$(echo "${node_json}" | jq -r '.beacond_config.priv_validator_key.priv_key.value')
 				local premined_deposit=$(echo "${node_json}" | jq -r '.premined_deposit')
 				local deposit_amount=$(echo "${node_json}" | jq -r '.deposit_amount')
-				local jwt=$(echo "${node_json}" | jq -r '.jwt')
-				local comet_address=$(echo "${node_json}" | jq -r '.comet_address')
-				local comet_pubkey=$(echo "${node_json}" | jq -r '.comet_pubkey')
-				local eth_beacon_pubkey=$(echo "${node_json}" | jq -r '.eth_beacon_pubkey')
+				local jwt=$(echo "${node_json}" | jq -r '.beacond_config.jwt')
+				local comet_address=$(echo "${node_json}" | jq -r '.beacond_config.comet_address')
+				local comet_pubkey=$(echo "${node_json}" | jq -r '.beacond_config.comet_pubkey')
+				local eth_beacon_pubkey=$(echo "${node_json}" | jq -r '.beacond_config.eth_beacon_pubkey')
 
 				# ports
 				local ethrpc_port=$(echo "${node_json}" | jq -r '.ethrpc_port')
@@ -442,9 +479,11 @@ cmd_start() {
 				mkdir -p "${node_dir}"
 				mkdir -p "${beacond_dir}"
 				mkdir -p "${bera_reth_dir}"
+				log_success "✔ Directories made"
 
 				# Init beacond node
 				${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+				log_success "✔ Beacond node initialized"
 
 				# - replace priv_validator_key.json
 				cat >"${beacond_dir}/config/priv_validator_key.json" <<EOF
@@ -460,23 +499,26 @@ cmd_start() {
   }
 }
 EOF
+				log_success "✔ priv_validator_key.json replaced"
+
 				# - replace node_key.json
 				cat >"${beacond_dir}/config/node_key.json" <<EOF
 {
   "priv_key": {
     "type": "${node_key_type}",
     "value": "${node_key_value}"
+    }
   }
-}
 EOF
+				log_success "✔ node_key.json replaced"
 
 				# - update genesis.json
 				cp -f "${beranodes_dir}/tmp/genesis.json" "${node_dir}/beacond/config/genesis.json"
+				log_success "✔ genesis.json copied"
 
 				# - add jwt.hex
-				cat >"${node_dir}/beacond/config/jwt.hex" <<EOF
-${jwt}
-EOF
+				echo -n "${jwt}" >"${node_dir}/beacond/config/jwt.hex"
+				log_success "✔ jwt.hex added"
 
 				# - update client.toml
 				# chain-id
@@ -495,6 +537,7 @@ EOF
 				sed "${SED_OPT[@]}" "s|^grpc_address = \".*\"|grpc_address = \"${clienttoml_grpc_address}\"|" "${node_dir}/beacond/config/client.toml"
 				# grpc-insecure
 				sed "${SED_OPT[@]}" "s|^grpc_insecure = \".*\"|grpc_insecure = \"${clienttoml_grpc_insecure}\"|" "${node_dir}/beacond/config/client.toml"
+				log_success "✔ client.toml updated"
 
 				# - update app.toml
 				echo "--------------------------------"
@@ -583,11 +626,12 @@ EOF
 				sed "${SED_OPT[@]}" "s|^availability-window = \".*\"|availability-window = \"${apptoml_beacon_kit_validator_availability_window}\"|" "${node_dir}/beacond/config/app.toml"
 				# [beacon-kit.node-api]
 				# enabled
-				sed "${SED_OPT[@]}" "176s|^enabled = .*|enabled = ${apptoml_beacon_kit_node_api_enabled}|" "${node_dir}/beacond/config/app.toml"
+				sed "${SED_OPT[@]}" "180s|^enabled = .*|enabled = \"${apptoml_beacon_kit_node_api_enabled}\"|" "${node_dir}/beacond/config/app.toml"
 				# address
 				sed "${SED_OPT[@]}" "183s|^address = \".*\"|address = \"127.0.0.1:${beacond_node_port}\"|" "${node_dir}/beacond/config/app.toml"
 				# logging
 				sed "${SED_OPT[@]}" "s|^logging = \".*\"|logging = \"${apptoml_beacon_kit_node_api_logging}\"|" "${node_dir}/beacond/config/app.toml"
+				log_success "✔ app.toml updated"
 
 				# - update config.toml
 				echo "--------------------------------"
@@ -621,11 +665,8 @@ EOF
 				# abci
 				sed "${SED_OPT[@]}" "s|^abci = \".*\"|abci = \"${configtoml_abci}\"|" "${node_dir}/beacond/config/config.toml"
 				# filter_peers
-				sed "${SED_OPT[@]}" "s|^filter_peers = \".*\"|filter_peers = \"${configtoml_filter_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^filter_peers = .*|filter_peers = \"${configtoml_filter_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				# [rpc]
-				echo "--------------------------------"
-				echo "config.toml - [rpc]"
-				echo "--------------------------------"
 				# laddr
 				sed "${SED_OPT[@]}" "94s|^laddr = \".*\"|laddr = \"tcp://127.0.0.1:${ethrpc_port}\"|" "${node_dir}/beacond/config/config.toml"
 				# cors_allowed_origins
@@ -650,27 +691,27 @@ EOF
 					sed "${SED_OPT[@]}" "s|^cors_allowed_headers = \[.*\]|cors_allowed_headers = [${formatted_cors_allowed_headers}]|" "${node_dir}/beacond/config/config.toml"
 				fi
 				# unsafe
-				sed "${SED_OPT[@]}" "s|^unsafe = \".*\"|unsafe = \"${configtoml_rpc_unsafe}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^unsafe = .*|unsafe = \"${configtoml_rpc_unsafe}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_open_connections
-				sed "${SED_OPT[@]}" "s|^max_open_connections = \".*\"|max_open_connections = \"${configtoml_rpc_max_open_connections}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_open_connections = .*|max_open_connections = \"${configtoml_rpc_max_open_connections}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_subscription_clients
-				sed "${SED_OPT[@]}" "s|^max_subscription_clients = \".*\"|max_subscription_clients = \"${configtoml_rpc_max_subscription_clients}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_subscription_clients = .*|max_subscription_clients = \"${configtoml_rpc_max_subscription_clients}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_subscriptions_per_client
-				sed "${SED_OPT[@]}" "s|^max_subscriptions_per_client = \".*\"|max_subscriptions_per_client = \"${configtoml_rpc_max_subscriptions_per_client}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_subscriptions_per_client = .*|max_subscriptions_per_client = \"${configtoml_rpc_max_subscriptions_per_client}\"|" "${node_dir}/beacond/config/config.toml"
 				# experimental-subscription-buffer-size
-				sed "${SED_OPT[@]}" "s|^experimental_subscription_buffer_size = \".*\"|experimental_subscription_buffer_size = \"${configtoml_rpc_experimental_subscription_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^experimental_subscription_buffer_size = .*|experimental_subscription_buffer_size = \"${configtoml_rpc_experimental_subscription_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
 				# experimental_websocket_write_buffer_size
-				sed "${SED_OPT[@]}" "s|^experimental_websocket_write_buffer_size = \".*\"|experimental_websocket_write_buffer_size = \"${configtoml_rpc_experimental_websocket_write_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^experimental_websocket_write_buffer_size = .*|experimental_websocket_write_buffer_size = \"${configtoml_rpc_experimental_websocket_write_buffer_size}\"|" "${node_dir}/beacond/config/config.toml"
 				# experimental_close_on_slow_client
-				sed "${SED_OPT[@]}" "s|^experimental_close_on_slow_client = \".*\"|experimental_close_on_slow_client = \"${configtoml_rpc_experimental_close_on_slow_client}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^experimental_close_on_slow_client = .*|experimental_close_on_slow_client = \"${configtoml_rpc_experimental_close_on_slow_client}\"|" "${node_dir}/beacond/config/config.toml"
 				# timeout_broadcast_tx_commit
 				sed "${SED_OPT[@]}" "s|^timeout_broadcast_tx_commit = \".*\"|timeout_broadcast_tx_commit = \"${configtoml_rpc_timeout_broadcast_tx_commit}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_request_batch_size
-				sed "${SED_OPT[@]}" "s|^max_request_batch_size = \".*\"|max_request_batch_size = \"${configtoml_rpc_max_request_batch_size}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_request_batch_size = .*|max_request_batch_size = \"${configtoml_rpc_max_request_batch_size}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_body_bytes
-				sed "${SED_OPT[@]}" "s|^max_body_bytes = \".*\"|max_body_bytes = \"${configtoml_rpc_max_body_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_body_bytes = .*|max_body_bytes = \"${configtoml_rpc_max_body_bytes}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_header_bytes
-				sed "${SED_OPT[@]}" "s|^max_header_bytes = \".*\"|max_header_bytes = \"${configtoml_rpc_max_header_bytes}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_header_bytes = .*|max_header_bytes = \"${configtoml_rpc_max_header_bytes}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_cert_file
 				sed "${SED_OPT[@]}" "s|^tls_cert_file = \".*\"|tls_cert_file = \"${configtoml_rpc_tls_cert_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_key_file
@@ -678,26 +719,23 @@ EOF
 				# pprof_laddr
 				sed "${SED_OPT[@]}" "s|^pprof_laddr = \".*\"|pprof_laddr = \"${configtoml_rpc_pprof_laddr}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc]
-				echo "--------------------------------"
-				echo "config.toml - [grpc]"
-				echo "--------------------------------"
 				# laddr
 				sed "${SED_OPT[@]}" "137s|^laddr = \".*\"|laddr = \"${configtoml_grpc_laddr}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc.version_service]
 				# enabled
-				sed "${SED_OPT[@]}" "218s|^enabled = \".*\"|enabled = \"${configtoml_grpc_version_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "218s|^enabled = .*|enabled = \"${configtoml_grpc_version_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc.block_service]
 				# enabled
-				sed "${SED_OPT[@]}" "222s|^enabled = \".*\"|enabled = \"${configtoml_grpc_block_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "222s|^enabled = .*|enabled = \"${configtoml_grpc_block_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc.block_results_service]
 				# enabled
-				sed "${SED_OPT[@]}" "227s|^enabled = \".*\"|enabled = \"${configtoml_grpc_block_results_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "227s|^enabled = .*|enabled = \"${configtoml_grpc_block_results_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc.privileged]
 				# laddr
 				sed "${SED_OPT[@]}" "235s|^laddr = \".*\"|laddr = \"${configtoml_grpc_privileged_laddr}\"|" "${node_dir}/beacond/config/config.toml"
 				# [grpc.privileged.pruning_service]
 				# enabled
-				sed "${SED_OPT[@]}" "248s|^enabled = \".*\"|enabled = \"${configtoml_grpc_privileged_pruning_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "248s|^enabled = .*|enabled = \"${configtoml_grpc_privileged_pruning_service_enabled}\"|" "${node_dir}/beacond/config/config.toml"
 				# [p2p]
 				# laddr
 				sed "${SED_OPT[@]}" "256s|^laddr = \".*\"|laddr = \"tcp://0.0.0.0:${ethp2p_port}\"|" "${node_dir}/beacond/config/config.toml"
@@ -705,18 +743,30 @@ EOF
 				sed "${SED_OPT[@]}" "s|^external_address = \".*\"|external_address = \"${configtoml_p2p_external_address}\"|" "${node_dir}/beacond/config/config.toml"
 
 				# Adjust seeds and peers to exclude the current node for connections
-				read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[0]}")
+				read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[$node_index]}")
+				read -a node_p2p_ports < <(array_exclude_element p2p_ports[@] "${p2p_ports[$node_index]}")
 				configtoml_p2p_seeds="$(
-					IFS=,
-					echo "${node_seeds[*]/%/@localhost:${ethp2p_port}}"
+					out=()
+					for i in "${!node_seeds[@]}"; do
+						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+					done
+					(
+						IFS=,
+						echo "${out[*]}"
+					)
 				)"
 
-				read -a node_peers < <(array_exclude_element peers[@] "${peers[0]}")
+				read -a node_peers < <(array_exclude_element peers[@] "${peers[$node_index]}")
 				configtoml_p2p_persistent_peers="$(
-					IFS=,
-					echo "${node_peers[*]/%/@localhost:${ethp2p_port}}"
+					out=()
+					for i in "${!node_seeds[@]}"; do
+						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+					done
+					(
+						IFS=,
+						echo "${out[*]}"
+					)
 				)"
-
 				# seeds
 				sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
 				# persistent_peers
@@ -724,11 +774,11 @@ EOF
 				# addr_book_file
 				sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
 				# addr_book_strict
-				sed "${SED_OPT[@]}" "s|^addr_book_strict = \".*\"|addr_book_strict = \"${configtoml_p2p_addr_book_strict}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^addr_book_strict = .*|addr_book_strict = \"${configtoml_p2p_addr_book_strict}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_num_inbound_peers
-				sed "${SED_OPT[@]}" "s|^max_num_inbound_peers = \".*\"|max_num_inbound_peers = \"${configtoml_p2p_max_num_inbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_num_inbound_peers = .*|max_num_inbound_peers = \"${configtoml_p2p_max_num_inbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_num_outbound_peers
-				sed "${SED_OPT[@]}" "s|^max_num_outbound_peers = \".*\"|max_num_outbound_peers = \"${configtoml_p2p_max_num_outbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^max_num_outbound_peers = .*|max_num_outbound_peers = \"${configtoml_p2p_max_num_outbound_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				# unconditional_peer_ids
 				sed "${SED_OPT[@]}" "s|^unconditional_peer_ids = \".*\"|unconditional_peer_ids = \"${configtoml_p2p_unconditional_peer_ids}\"|" "${node_dir}/beacond/config/config.toml"
 				# persistent_peers_max_dial_period
@@ -738,25 +788,22 @@ EOF
 				# max_packet_msg_payload_size
 				sed "${SED_OPT[@]}" "s|^max_packet_msg_payload_size = \".*\"|max_packet_msg_payload_size = \"${configtoml_p2p_max_packet_msg_payload_size}\"|" "${node_dir}/beacond/config/config.toml"
 				# send_rate
-				sed "${SED_OPT[@]}" "s|^send_rate = \".*\"|send_rate = \"${configtoml_p2p_send_rate}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^send_rate = .*|send_rate = \"${configtoml_p2p_send_rate}\"|" "${node_dir}/beacond/config/config.toml"
 				# recv_rate
-				sed "${SED_OPT[@]}" "s|^recv_rate = \".*\"|recv_rate = \"${configtoml_p2p_recv_rate}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^recv_rate = .*|recv_rate = \"${configtoml_p2p_recv_rate}\"|" "${node_dir}/beacond/config/config.toml"
 				# pex
-				sed "${SED_OPT[@]}" "s|^pex = \".*\"|pex = \"${configtoml_p2p_pex}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^pex = .*|pex = \"${configtoml_p2p_pex}\"|" "${node_dir}/beacond/config/config.toml"
 				# seed_mode
 				sed "${SED_OPT[@]}" "s|^seed_mode = \".*\"|seed_mode = \"${configtoml_p2p_seed_mode}\"|" "${node_dir}/beacond/config/config.toml"
 				# private_peer_ids
 				sed "${SED_OPT[@]}" "s|^private_peer_ids = \".*\"|private_peer_ids = \"${configtoml_p2p_private_peer_ids}\"|" "${node_dir}/beacond/config/config.toml"
 				# allow_duplicate_ip
-				sed "${SED_OPT[@]}" "s|^allow_duplicate_ip = \".*\"|allow_duplicate_ip = \"${configtoml_p2p_allow_duplicate_ip}\"|" "${node_dir}/beacond/config/config.toml"
+				sed "${SED_OPT[@]}" "s|^allow_duplicate_ip = .*|allow_duplicate_ip = ${configtoml_p2p_allow_duplicate_ip}|" "${node_dir}/beacond/config/config.toml"
 				# handshake_timeout
 				sed "${SED_OPT[@]}" "s|^handshake_timeout = \".*\"|handshake_timeout = \"${configtoml_p2p_handshake_timeout}\"|" "${node_dir}/beacond/config/config.toml"
 				# dial_timeout
 				sed "${SED_OPT[@]}" "s|^dial_timeout = \".*\"|dial_timeout = \"${configtoml_p2p_dial_timeout}\"|" "${node_dir}/beacond/config/config.toml"
 				# [mempool]
-				echo "--------------------------------"
-				echo "config.toml - [mempool]"
-				echo "--------------------------------"
 				# type
 				sed "${SED_OPT[@]}" "s|^type = \".*\"|type = \"${configtoml_mempool_type}\"|" "${node_dir}/beacond/config/config.toml"
 				# recheck
@@ -778,9 +825,6 @@ EOF
 				# keep-invalid-txs-in-cache
 				sed "${SED_OPT[@]}" "s|^keep_invalid_txs_in_cache = \".*\"|keep_invalid_txs_in_cache = \"${configtoml_mempool_keep_invalid_txs_in_cache}\"|" "${node_dir}/beacond/config/config.toml"
 				# [statesync]
-				echo "--------------------------------"
-				echo "config.toml - [statesync]"
-				echo "--------------------------------"
 				# enable
 				sed "${SED_OPT[@]}" "404s|^enable = .*|enable = ${configtoml_statesync_enable}|" "${node_dir}/beacond/config/config.toml"
 				# rpc_servers
@@ -800,15 +844,9 @@ EOF
 				# chunk_fetchers
 				sed "${SED_OPT[@]}" "s|^chunk_fetchers = \".*\"|chunk_fetchers = \"${configtoml_statesync_chunk_fetchers}\"|" "${node_dir}/beacond/config/config.toml"
 				# [blocksync]
-				echo "--------------------------------"
-				echo "config.toml - [blocksync]"
-				echo "--------------------------------"
 				# version
 				sed "${SED_OPT[@]}" "442s|^version = .*|version = \"${configtoml_blocksync_version}\"|" "${node_dir}/beacond/config/config.toml"
 				# [consensus]
-				echo "--------------------------------"
-				echo "config.toml - [consensus]"
-				echo "--------------------------------"
 				# wal_file
 				sed "${SED_OPT[@]}" "s|^wal_file = \".*\"|wal_file = \"${configtoml_consensus_wal_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# timeout_propose
@@ -849,9 +887,6 @@ EOF
 				# compaction_interval
 				sed "${SED_OPT[@]}" "s|^compaction_interval = \".*\"|compaction_interval = \"${configtoml_storage_compaction_interval}\"|" "${node_dir}/beacond/config/config.toml"
 				# [storage.pruning]
-				echo "--------------------------------"
-				echo "config.toml - [storage.pruning]"
-				echo "--------------------------------"
 				# interval
 				sed "${SED_OPT[@]}" "s|^interval = \".*\"|interval = \"${configtoml_storage_pruning_interval}\"|" "${node_dir}/beacond/config/config.toml"
 				# [storage.pruning.data_companion]
@@ -875,80 +910,101 @@ EOF
 				sed "${SED_OPT[@]}" '588s|^max_open_connections = .*$|max_open_connections = '"${configtoml_instrumentation_max_open_connections}"'|' "${node_dir}/beacond/config/config.toml"
 				# namespace
 				sed "${SED_OPT[@]}" "s|^namespace = \".*\"|namespace = \"${configtoml_instrumentation_namespace}\"|" "${node_dir}/beacond/config/config.toml"
+				log_success "✔ config.toml updated"
 
 				# Init bera-reth node
-				cp "${beranodes_dir}/tmp/eth-genesis.json" "${bera_reth_dir}/eth-genesis.json"
+				cp "${beranodes_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" "${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}"
 				${bin_bera_reth} init \
-					--chain="${bera_reth_dir}/eth-genesis.json" \
-					--datadir="${bera_reth_dir}" \
-					2>/dev/null
-
-				# --full - full archiving
-				# --bootnodes
-				# --trusted-peers
-				# --authrpc.port
-				# --authrpc.jwtsecret
-				# --port
-				# --metrics
-				# --http
-				# --http.addr
-				# --http.port
-				# --ipcpath
-				# --discovery.port
-				# --http.corsdomain
-				# --log.file.directory
-				# --engine.persistence-threshold
-				# --engine.memory-block-buffer-target
-				#
-				# --authrpc.addr 127.0.0.1		\
-				# --authrpc.port $EL_AUTHRPC_PORT		\
-				# --authrpc.jwtsecret $JWT_PATH		\
-				# --port $EL_ETH_PORT			\
-				# --metrics $EL_PROMETHEUS_PORT		\
-				# --http					\
-				# --http.addr 0.0.0.0			\
-				# --http.port $EL_ETHRPC_PORT		\
-				# --ipcpath /tmp/reth.ipc.$EL_ETHRPC_PORT \
-				# --discovery.port $EL_ETH_PORT		\
-				# --http.corsdomain '*'			\
-				# --log.file.directory $LOG_DIR		\
-				# --engine.persistence-threshold 0	\
-				# --engine.memory-block-buffer-target 0
+					--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
+					--datadir="${bera_reth_dir}" >/dev/null 2>&1
+				# remove existing discovery-secret
+				if [ -f "${bera_reth_dir}/discovery-secret" ]; then
+					rm -f "${bera_reth_dir}/discovery-secret"
+				fi
+				log_success "✔ bera-reth node initialized"
 			done
 
 			# Start the nodes and record their pids
+			print_header "Starting nodes"
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
 				# beacond
 				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
 				local moniker=$(echo "${node_json}" | jq -r '.moniker')
 				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${role}-${node_index}"
 				local beacond_dir="${node_dir}/beacond"
+				local bera_reth_dir="${node_dir}/bera-reth"
+				local jwt=$(echo "${node_json}" | jq -r '.beacond_config.jwt')
 				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-beacond.log" &
 				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-beacond.pid"
+				log_success "✔ Beacond node started"
 
 				# bera-reth
 				local el_authrpc_port=$(echo "${node_json}" | jq -r '.el_authrpc_port')
 				local el_ws_port=$(echo "${node_json}" | jq -r '.el_ws_port')
+				local el_eth_port=$(echo "${node_json}" | jq -r '.el_eth_port')
+				local el_ethrpc_port=$(echo "${node_json}" | jq -r '.el_ethrpc_port')
+				local el_prometheus_port=$(echo "${node_json}" | jq -r '.el_prometheus_port')
+				local cl_prometheus_port=$(echo "${node_json}" | jq -r '.cl_prometheus_port')
+				local beacond_node_port=$(echo "${node_json}" | jq -r '.beacond_node_port')
+				local configtoml_grpc_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_laddr')
+				local configtoml_grpc_privileged_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_privileged_laddr')
+
+				read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
+				read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
+				read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
+
+				configtoml_berareth_bootnodes="$(
+					out=()
+					for i in "${!bootnodes[@]}"; do
+						out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
+					done
+					(
+						IFS=,
+						echo "${out[*]}"
+					)
+				)"
+				configtoml_berareth_trusted_peers="$(
+					out=()
+					for i in "${!trusted_peers[@]}"; do
+						out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
+					done
+					(
+						IFS=,
+						echo "${out[*]}"
+					)
+				)"
+
+				private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
+				public_key=$(echo "${node_json}" | jq -r '.berareth_config.public_key')
+
+				# Add discovery secret - enode bera-reth id
+				echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret"
 				${bin_bera_reth} node \
-					--chain="${bera_reth_dir}/eth-genesis.json" \
-					--datadir="${bera_reth_dir}" \
+					--bootnodes="${configtoml_berareth_bootnodes}" \
+					--trusted-peers="${configtoml_berareth_trusted_peers}" \
 					--authrpc.addr="127.0.0.1" \
 					--authrpc.port="${el_authrpc_port}" \
 					--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
-					--port="${el_eth_port}" \
+					--chain="${bera_reth_dir}/eth-genesis.json" \
+					--datadir="${bera_reth_dir}" \
+					--discovery.port="${el_eth_port}" \
 					--engine.persistence-threshold=0 \
 					--engine.memory-block-buffer-target=0 \
 					--http \
+					--nat="extip:127.0.0.1" \
 					--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
 					--http.addr=0.0.0.0 \
 					--http.port="${el_ethrpc_port}" \
-					--http.corsdomain=\"*\" \
+					--http.corsdomain="*" \
+					--port="${el_eth_port}" \
 					--ws \
 					--ws.addr=0.0.0.0 \
 					--ws.port="${el_ws_port}" \
-					--ws.origins=\"*\" \
+					--ws.origins="*" \
 					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-bera-reth.log" &
-				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-bera-reth.pid"
+				local pid=$!
+				echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-bera-reth.pid"
+				log_success "✔ Bera-reth node started"
 			done
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")
@@ -956,14 +1012,4 @@ EOF
 			return 1
 		fi
 	fi
-
-	# -------------------------------------------------------------------------
-	# [STEP 6] Future Network Support
-	# -------------------------------------------------------------------------
-	# TODO: Implement testnet (bepolia) and mainnet support
-	# This will require:
-	# - Network-specific genesis files
-	# - Bootnodes for peer discovery
-	# - Chain-specific configuration parameters
-	# -------------------------------------------------------------------------
 }
