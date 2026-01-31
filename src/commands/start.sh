@@ -1,5 +1,5 @@
 # =============================================================================
-# Start Command - Beranode CLI v0.5.0
+# Start Command - Beranode CLI v0.6.0
 # =============================================================================
 # This module implements the 'start' command for the Beranode CLI tool.
 # It orchestrates the startup of Berachain nodes (validators, full nodes, or
@@ -18,7 +18,7 @@
 #
 # VERSION HISTORY:
 # ----------------
-# v0.5.0 - Current version
+# v0.6.0 - Current version
 #        - Added --help command support
 #        - Enhanced version management with semantic versioning
 #        - Improved error handling and validation
@@ -980,8 +980,8 @@ EOF
 				# Add discovery secret - enode bera-reth id
 				echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret"
 				${bin_bera_reth} node \
-					--bootnodes="${configtoml_berareth_bootnodes}" \
-					--trusted-peers="${configtoml_berareth_trusted_peers}" \
+					$( [[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}" ) \
+					$( [[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}" ) \
 					--authrpc.addr="127.0.0.1" \
 					--authrpc.port="${el_authrpc_port}" \
 					--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \

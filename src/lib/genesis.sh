@@ -6,12 +6,12 @@
 # layer (CL) genesis files, validator keys, and network initialization.
 #
 # LEGEND - Function Overview:
-# [1] generate_eth_genesis_file    - Creates Ethereum execution layer genesis.json
+# [1] generate_eth_genesis_file    - Creates Berachain execution layer genesis.json
 # [2] generate_base_beranodes_config        - Generates validator keys for consensus layer
 # [3] generate_genesis_file        - Creates basic beacon chain genesis file
 # [4] generate_beacond_genesis     - Comprehensive beacon genesis with deposits
 #
-# VERSION CONTEXT (v0.5.0):
+# VERSION CONTEXT (v0.6.0):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)
@@ -19,9 +19,9 @@
 # =============================================================================
 
 # =============================================================================
-# [1] GENERATE ETHEREUM GENESIS FILE
+# [1] GENERATE BERACHAIN EXECUTION LAYER GENESIS FILE
 # =============================================================================
-# Generates the Ethereum execution layer (EL) genesis JSON file for Bera-Reth.
+# Generates the Berachain execution layer (EL) genesis JSON file for Bera-Reth.
 # This file configures the EVM state, hard fork parameters, pre-deployed contracts,
 # and initial account allocations.
 #

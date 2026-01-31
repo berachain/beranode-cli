@@ -14,38 +14,49 @@
 # =============================================================================
 # This version is automatically updated by scripts/bump-version.sh
 # Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.5.0"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.6.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # Get platform
 # =============================================================================
 # Detect if running on Windows (PowerShell), Linux, or macOS
-readonly PLATFORM=$(uname)
+readonly PLATFORM="$(uname)"
+readonly ARCH="$(uname -m)"
+
 if [[ "$PLATFORM" == "Darwin" ]]; then
 	readonly IS_MACOS=true
 	readonly IS_LINUX=false
 	readonly IS_WINDOWS=false
+	readonly IS_LINUX_ARM=false
 elif [[ "$PLATFORM" == "Linux" ]]; then
 	readonly IS_MACOS=false
 	readonly IS_LINUX=true
 	readonly IS_WINDOWS=false
+	# Detect if CPU architecture is ARM (e.g., "armv7l", "aarch64", etc.)
+	if [[ "$ARCH" == arm* ]] || [[ "$ARCH" == aarch64* ]]; then
+		readonly IS_LINUX_ARM=true
+	else
+		readonly IS_LINUX_ARM=false
+	fi
 elif [[ "$PLATFORM" == MINGW* ]] || [[ "$PLATFORM" == CYGWIN* ]] || [[ "$PLATFORM" == MSYS* ]]; then
 	readonly IS_MACOS=false
 	readonly IS_LINUX=false
 	readonly IS_WINDOWS=true
+	readonly IS_LINUX_ARM=false
 else
 	readonly IS_MACOS=false
 	readonly IS_LINUX=false
 	readonly IS_WINDOWS=false
+	readonly IS_LINUX_ARM=false
 	echo "error: unsupported platform: '${PLATFORM}'" >&2
 	exit 1
 fi
 
 # Temporary
-if [ "$IS_MACOS" == false ]; then
+if [ "$IS_WINDOWS" == true ]; then
 	local_red='\033[0;31m'
 	local_reset='\033[0m'
-	echo -e "${local_red}[ERROR] This script currently only supports macOS. Linux and Windows support coming soon.${local_reset}" >&2
+	echo -e "${local_red}[ERROR] This script currently only supports macOS and Linux. Windows support coming soon.${local_reset}" >&2
 	exit 1
 fi
 
@@ -108,13 +119,15 @@ readonly BERANODES_PATH_RUNS="/runs"
 readonly GENESIS_ETH_NAME_DEFAULT="eth-genesis.json"
 readonly GENESIS_BEACON_NAME_DEFAULT="genesis.json"
 readonly SUPPORTED_CAST_VERSION="1.6.0"
+readonly SUPPORTED_TAR_GZ_VERSION="1.34"
+readonly SUPPORTED_CURL_VERSION="8.7.1"
 BERANODES_PATH=${BERANODES_PATH:-$(pwd)/beranodes}
 
 # =============================================================================
 # Repositories
 # =============================================================================
-readonly RELEASE_BERARETH="https://api.github.com/repos/berachain/bera-reth/releases/latest"
-readonly RELEASE_BEACONKIT="https://api.github.com/repos/berachain/beacon-kit/releases/latest"
+readonly RELEASE_BERARETH="https://api.github.com/repos/berachain/bera-reth"
+readonly RELEASE_BEACONKIT="https://api.github.com/repos/berachain/beacon-kit"
 readonly REPO_BEACONKIT="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks/80094"
 
 # =============================================================================

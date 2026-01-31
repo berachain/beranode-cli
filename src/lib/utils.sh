@@ -182,7 +182,7 @@ check_cast_version() {
 	fi
 
 	# Extract version from 'cast --version' output
-	# Example output: "cast v0.5.0 (abc123 2024-01-01T00:00:00Z)"
+	# Example output: "cast v0.6.0 (abc123 2024-01-01T00:00:00Z)"
 	# We extract the 3rd field and strip any suffix like "-nightly"
 	cast_version_raw="$(cast --version 2>/dev/null | head -n1 | awk '{print $3}')"
 	cast_version="${cast_version_raw%%-*}" # Strip suffix: "1.2.3-nightly" -> "1.2.3"
@@ -227,6 +227,26 @@ check_cast_version() {
 		return 0
 	else
 		log_error "'cast' version $cast_version is less than required $required_version"
+		return 1
+	fi
+}
+
+check_curl_version() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: check_curl_version" >&2
+
+	# First, verify that 'curl' command exists in PATH
+	if ! command -v curl >/dev/null 2>&1; then
+		log_error "'curl' is not installed or not in PATH."
+		return 1
+	fi
+}
+
+check_tar_gz_version() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: check_tar_gz_version" >&2
+
+	# First, verify that 'tar' command exists in PATH
+	if ! command -v tar >/dev/null 2>&1; then
+		log_error "'tar' is not installed or not in PATH."
 		return 1
 	fi
 }

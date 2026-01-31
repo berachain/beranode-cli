@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                    BERANODE CLI LOGGING MODULE v0.5.0                     ║
+# ║                    BERANODE CLI LOGGING MODULE v0.6.0                     ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 #
 # FILE:         logging.sh
 # PURPOSE:      Provides colored logging output and formatting functions
-# SINCE:        v0.5.0
-# MODIFIED:     v0.5.0 - Enhanced formatting and documentation
+# SINCE:        v0.6.0
+# MODIFIED:     v0.6.0 - Enhanced formatting and documentation
 #
 # DESCRIPTION:
 #   This module is the central logging system for the Beranode CLI. It provides
@@ -16,7 +16,7 @@
 #   functions support DEBUG_MODE for development troubleshooting.
 #
 # VERSION CONTEXT:
-#   In v0.5.0, this logging system is used throughout the CLI for consistent
+#   In v0.6.0, this logging system is used throughout the CLI for consistent
 #   user feedback during node initialization, configuration, startup, and
 #   runtime operations. It integrates with the help system (--help commands)
 #   and provides the primary interface for user notifications.

@@ -3,7 +3,7 @@
 # BERANODE INIT COMMAND
 # =============================================================================
 # File: src/commands/init.sh
-# Version: Compatible with Beranode CLI v0.5.0
+# Version: Compatible with Beranode CLI v0.6.0
 # Description: Initializes Berachain node configurations including validator,
 #              full nodes, and pruned nodes with comprehensive configuration
 #              management for client.toml, app.toml, and config.toml files.
@@ -61,9 +61,9 @@
 #      └─ Generate beacond genesis.json
 #
 # =============================================================================
-# RELATIONSHIP TO CURRENT VERSION (v0.5.0)
+# RELATIONSHIP TO CURRENT VERSION (v0.6.0)
 # =============================================================================
-# This init.sh file is part of the Beranode CLI v0.5.0 and works in
+# This init.sh file is part of the Beranode CLI v0.6.0 and works in
 # conjunction with:
 #
 # - src/lib/constants.sh     : Provides network constants, default ports, and
@@ -347,7 +347,23 @@ cmd_init() {
 	fi
 	log_success "Cast version is supported."
 
+  # Check curl version
+  check_curl_version
+  if [[ $? -ne 0 ]]; then
+    log_error "Curl version is not supported. Please upgrade to version $SUPPORTED_CURL_VERSION or higher."
+    return 1
+  fi
+  log_success "Curl version is supported."
+
 	print_header "Initializing Berachain Node"
+
+  # Check for .tar.gz installed locally
+  check_tar_gz_version
+  if [[ $? -ne 0 ]]; then
+    log_error "Tar.gz version is not supported. Please upgrade to version $SUPPORTED_TAR_GZ_VERSION or higher."
+    return 1
+  fi
+  log_success "Tar.gz version is supported."
 
 	# =========================================================================
 	# [2] VARIABLE INITIALIZATION
@@ -369,6 +385,8 @@ cmd_init() {
 	local wallet_private_key=""
 	local wallet_address=""
 	local wallet_balance=${DEFAULT_WALLET_BALANCE}
+  local beacond_version="latest"
+  local berareth_version="latest"
 
 	# Client.toml configuration variables
 	local clienttoml_chain_id="${CLIENTTOML_CHAIN_ID}"
@@ -588,6 +606,38 @@ cmd_init() {
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
+    --beacond-version)
+      if [[ -n "$2" ]]; then
+        check_beacond_version="$2"
+        if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+          log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.6.0, v0.6.0-rc2)"
+          log_warn "defaulting to ${beacond_version}..."
+        else
+          beacond_version="$check_beacond_version"
+        fi
+        log_info "Using beacond version: $beacond_version"
+        shift 2
+      else
+        log_warn "--beacond-version is not set. defaulting to ${beacond_version}"
+        shift
+      fi
+      ;;
+    --berareth-version)
+      if [[ -n "$2" ]]; then
+        check_berareth_version="$2"
+        if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+          log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.6.0, v0.6.0-rc2)"
+          log_warn "defaulting to ${berareth_version}..."
+        else
+          berareth_version="$check_berareth_version"
+        fi
+        log_info "Using berareth version: $berareth_version"
+        shift 2
+      else
+        log_warn "--berareth-version is not set. defaulting to ${berareth_version}"
+        shift
+      fi
+      ;;
 		--beranodes-dir)
 			if [[ -n "$2" ]]; then
 				BERANODES_PATH="$2"
@@ -2208,23 +2258,33 @@ cmd_init() {
 
 	missing_binaries=0
 	# - beacond
+  is_beacond_installed=false
 	if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
-		log_error "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
-		missing_binaries=1
+		log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
 	else
 		# Check if 'beacond version' command executes successfully
 		beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
 		if [[ $? -eq 0 ]]; then
 			log_success "'${BIN_BEACONKIT} version' works as expected."
 			log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
+      is_beacond_installed=true
 		else
 			log_error "'${BIN_BEACONKIT} version' did not work as expected."
 		fi
 	fi
 
+  if [[ "$is_beacond_installed" == false ]]; then
+    log_info "Installing beacond binary..."
+    download_beranodes_binary \
+      --config-dir "${BERANODES_PATH}" \
+      --binary-to-download "${BIN_BEACONKIT}" \
+      --version-tag "latest"
+  fi
+
 	# - berareth
+  is_berareth_installed=false
 	if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
-		log_error "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
+		log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
 		missing_binaries=1
 	else
 		# Check if 'berareth version' command executes successfully
@@ -2232,14 +2292,19 @@ cmd_init() {
 		if [[ $? -eq 0 ]]; then
 			log_success "'${BIN_BERARETH} --version' works as expected."
 			log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
+      is_berareth_installed=true
 		else
 			log_error "'${BIN_BERARETH} --version' did not work as expected."
 		fi
 	fi
-	if [[ $missing_binaries -ge 1 ]]; then
-		log_error "Some required binaries are missing.\nPlease install them manually and place them in the 'beranodes/bin' directory.\n(Auto-installing coming soon!)"
-		return 1
-	fi
+
+  if [[ "$is_berareth_installed" == false ]]; then
+    log_info "Installing bera-reth binary..."
+    download_beranodes_binary \
+      --config-dir "${BERANODES_PATH}" \
+      --binary-to-download "${BIN_BERARETH}" \
+      --version-tag "latest"
+  fi
 
 	# =========================================================================
 	# [7] WALLET GENERATION
