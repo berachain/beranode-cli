@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 #
 # bump-version.sh - Bump version following SemVer conventions
 #
@@ -153,7 +154,7 @@ update_changelog() {
 
 	# Check if unreleased section has any content beyond headers
 	local has_changes
-	has_changes=$(echo "$unreleased_content" | grep -v '^## \[Unreleased\]' | grep -v '^$' | grep -v '^### ' | head -1)
+	has_changes=$(echo "$unreleased_content" | grep -v '^## \[Unreleased\]' | grep -v '^$' | grep -v '^### ' | head -1 || true)
 
 	if [[ -z "$has_changes" && -z "$description" ]]; then
 		echo -e "${YELLOW}Warning: No changes documented in [Unreleased] section${RESET}"
@@ -197,9 +198,7 @@ update_changelog() {
         # Add Changed Files section
         print "### Changed Files"
         print ""
-        print "- `src/lib/constants.sh` - Updated BERANODE_VERSION to " new_ver
-        print "- `beranode` - Rebuilt from sources"
-        print "- `CHANGELOG.md` - Updated with release " new_ver
+        system("git status --short | grep -E \"^( M|\\?\\?)\" | sed \"s/^.. /- /\"")
         print ""
 
         # Add standard changelog sections

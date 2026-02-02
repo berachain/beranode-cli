@@ -1,28 +1,99 @@
 #!/usr/bin/env bash
+set -euo pipefail
+################################################################################
+# constants.sh - Beranode CLI Constants and Configuration
+################################################################################
 #
-# constants.sh - Beranode CLI Constants
+# This module defines all readonly constants and configuration values used
+# throughout the Beranode CLI. Constants are organized into logical sections
+# for maintainability and ease of reference.
 #
-# This module contains all readonly constants used throughout the beranode CLI.
-# These include network configurations, default ports, genesis contract configurations,
-# and Prague upgrade parameters.
+# IMPORTANT: This file contains critical configuration for:
+#   - Network identifiers (chain IDs, network names)
+#   - Port allocations (consensus layer, execution layer, metrics)
+#   - Binary names and release URLs
+#   - Directory structure definitions
+#   - Genesis contract deployments (EIP-4788, CREATE2, Multicall3, etc.)
+#   - Prague upgrade parameters (Berachain-specific)
 #
+# VERSION MANAGEMENT:
+#   The BERANODE_VERSION constant is automatically managed by
+#   scripts/bump-version.sh - do not edit manually.
+#
+# LEGEND - Constant Categories:
+# ──────────────────────────────────────────────────────────────────────────────
+# [1] VERSION INFORMATION
+#     └─ BERANODE_VERSION          : CLI version (auto-managed)
+#
+# [2] PLATFORM DETECTION
+#     └─ PLATFORM, ARCH            : OS and architecture detection
+#     └─ IS_MACOS, IS_LINUX, etc.  : Platform-specific booleans
+#     └─ SED_OPT                   : Platform-specific sed options
+#
+# [3] NETWORK CONFIGURATION
+#     └─ CHAIN_ID_*                : Network chain IDs (devnet, testnet, mainnet)
+#     └─ CHAIN_NAME_*              : Network names
+#     └─ GENESIS_DEPOSIT_AMOUNT    : Validator deposit amount
+#
+# [4] PORT ALLOCATIONS
+#     └─ DEFAULT_CL_*              : Consensus Layer (BeaconKit) ports
+#     └─ DEFAULT_EL_*              : Execution Layer (Bera-Reth) ports
+#     └─ DEFAULT_*_PROMETHEUS_PORT : Metrics ports
+#
+# [5] BINARIES AND RELEASES
+#     └─ BIN_*                     : Binary executable names
+#     └─ RELEASE_*                 : GitHub release API URLs
+#     └─ REPO_*                    : GitHub repository URLs
+#
+# [6] DIRECTORY STRUCTURE
+#     └─ BERANODES_PATH_*          : Standard directory layout
+#     └─ GENESIS_*_NAME_DEFAULT    : Genesis file names
+#
+# [7] GENESIS CONTRACTS
+#     └─ ETH_GENESIS_BEACON_ROOTS_*      : EIP-4788 Beacon Roots
+#     └─ ETH_GENESIS_CREATE2_DEPLOYER_*  : CREATE2 factory
+#     └─ ETH_GENESIS_MULTICALL3_*        : Batch call aggregator
+#     └─ ETH_GENESIS_WBERA_*             : Wrapped BERA token
+#     └─ ETH_GENESIS_PERMIT2_*           : Uniswap Permit2
+#     └─ ETH_GENESIS_BEACON_DEPOSIT_*    : Validator deposits
+#
+# [8] PRAGUE UPGRADE PARAMETERS
+#     └─ ETH_GENESIS_PRAGUE*_*     : Berachain-specific upgrade configs
+#
+################################################################################
 
-# DEBUG_MODE=true # Use DEBUG_MODE=true ./beranode ...
+# =============================================================================
+# [1] VERSION INFORMATION
+# =============================================================================
+
+# Variable: BERANODE_VERSION
+# Type: String (semver format: X.Y.Z)
+# Description: Current version of the Beranode CLI tool
+# Management: Automatically updated by scripts/bump-version.sh
+# WARNING: Do not manually edit this value - use bump-version.sh script
+#
+# Example: "0.6.0"
+BERANODE_VERSION="0.7.1"  # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
-# Beranode CLI Version
+# [2] PLATFORM DETECTION
 # =============================================================================
-# This version is automatically updated by scripts/bump-version.sh
-# Do not manually edit this version - use the bump-version.sh script instead
-BERANODE_VERSION="0.6.0"  # Managed by scripts/bump-version.sh - do not edit manually
 
-# =============================================================================
-# Get platform
-# =============================================================================
-# Detect if running on Windows (PowerShell), Linux, or macOS
+# Variables: PLATFORM, ARCH
+# Type: String (readonly)
+# Description: Detected operating system and CPU architecture
+# Values:
+#   - PLATFORM: "Darwin" (macOS), "Linux", "MINGW*/CYGWIN*/MSYS*" (Windows)
+#   - ARCH: "x86_64", "arm64", "aarch64", etc.
+# Usage: Used throughout the CLI for platform-specific logic
 readonly PLATFORM="$(uname)"
 readonly ARCH="$(uname -m)"
 
+# Variables: IS_MACOS, IS_LINUX, IS_WINDOWS, IS_LINUX_ARM
+# Type: Boolean (readonly)
+# Description: Platform detection flags for conditional logic
+# Values: true/false
+# Purpose: Enables platform-specific behavior (binary selection, sed syntax, etc.)
 if [[ "$PLATFORM" == "Darwin" ]]; then
 	readonly IS_MACOS=true
 	readonly IS_LINUX=false
@@ -52,7 +123,9 @@ else
 	exit 1
 fi
 
-# Temporary
+# Windows Support Status
+# Currently, Windows support is not implemented. This check prevents
+# the CLI from running on Windows until full support is added.
 if [ "$IS_WINDOWS" == true ]; then
 	local_red='\033[0;31m'
 	local_reset='\033[0m'
@@ -60,6 +133,13 @@ if [ "$IS_WINDOWS" == true ]; then
 	exit 1
 fi
 
+# Variable: SED_OPT
+# Type: Array (readonly)
+# Description: Platform-specific sed in-place edit options
+# Values:
+#   - macOS: (-i '') - requires empty string argument
+#   - Linux: (-i)    - no additional argument needed
+# Purpose: Ensures sed in-place editing works across platforms
 if [[ $(uname) == "Darwin" ]]; then
 	readonly SED_OPT=(-i '')
 else
@@ -67,68 +147,275 @@ else
 fi
 
 # =============================================================================
-# Network Chain IDs and Names
+# [3] NETWORK CONFIGURATION
 # =============================================================================
 
-# Network chain IDs (enforced)
+# Variables: CHAIN_ID_*, CHAIN_NAME_*
+# Type: Integer (chain ID) and String (chain name) - readonly
+# Description: Berachain network identifiers and names
+#
+# Supported Networks:
+#   - devnet (chain ID: 80087)   : Local development network
+#   - bepolia (chain ID: 80069)  : Public testnet
+#   - mainnet (chain ID: 80094)  : Production network
+#
+# Purpose: These constants enforce network identity for EIP-155 transaction
+#          signing and prevent replay attacks across different networks.
 readonly CHAIN_ID_DEVNET=80087
 readonly CHAIN_NAME_DEVNET="devnet"
 readonly CHAIN_ID_TESTNET=80069
 readonly CHAIN_NAME_TESTNET="bepolia"
 readonly CHAIN_ID_MAINNET=80094
 readonly CHAIN_NAME_MAINNET="mainnet"
+
+# Variable: GENESIS_DEPOSIT_AMOUNT
+# Type: Integer (Wei denomination) - readonly
+# Description: Minimum validator deposit amount for Berachain PoS
+# Value: 250000000000000 Wei (0.00025 BERA)
+# Purpose: Validators must deposit this amount to participate in consensus
 readonly GENESIS_DEPOSIT_AMOUNT=250000000000000
 
 # =============================================================================
-# Default Ports
+# [4] PORT ALLOCATIONS
 # =============================================================================
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Consensus Layer (BeaconKit/Beacond) Ports
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DEFAULT_CL_ETHRPC_PORT
+# Description: Consensus layer RPC endpoint port (Tendermint RPC)
+# Default: 26657
+# Usage: Used for querying consensus layer state and submitting transactions
 readonly DEFAULT_CL_ETHRPC_PORT=26657
+
+# Variable: DEFAULT_CL_ETHP2P_PORT
+# Description: Consensus layer P2P communication port
+# Default: 26656
+# Usage: Node-to-node communication for block propagation and consensus
 readonly DEFAULT_CL_ETHP2P_PORT=26656
+
+# Variable: DEFAULT_CL_ETHPROXY_PORT
+# Description: Consensus layer proxy port
+# Default: 26658
+# Usage: HTTP proxy for consensus layer API access
 readonly DEFAULT_CL_ETHPROXY_PORT=26658
-readonly DEFAULT_EL_ETHRPC_PORT=8545
-readonly DEFAULT_EL_WS_PORT=8546
-readonly DEFAULT_EL_AUTHRPC_PORT=8551
-readonly DEFAULT_DEFAULT_EL_ETH_PORT=30303
-readonly DEFAULT_EL_PROMETHEUS_PORT=9101
+
+# Variable: DEFAULT_CL_PROMETHEUS_PORT
+# Description: Consensus layer Prometheus metrics port
+# Default: 26660
+# Usage: Exports consensus layer metrics for monitoring
 readonly DEFAULT_CL_PROMETHEUS_PORT=26660
-readonly DEFAULT_PORT_INCREMENT=100
-readonly DEFAULT_WALLET_BALANCE=1000000000000000000000000000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Execution Layer (Bera-Reth) Ports
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DEFAULT_EL_ETHRPC_PORT
+# Description: Execution layer JSON-RPC HTTP endpoint
+# Default: 8545 (standard Ethereum RPC port)
+# Usage: Primary interface for dApp communication (eth_call, eth_sendTransaction, etc.)
+readonly DEFAULT_EL_ETHRPC_PORT=8545
+
+# Variable: DEFAULT_EL_WS_PORT
+# Description: Execution layer WebSocket endpoint
+# Default: 8546 (standard Ethereum WebSocket port)
+# Usage: Real-time event subscriptions (logs, newHeads, etc.)
+readonly DEFAULT_EL_WS_PORT=8546
+
+# Variable: DEFAULT_EL_AUTHRPC_PORT
+# Description: Execution layer authenticated Engine API port
+# Default: 8551 (standard post-Merge auth port)
+# Usage: Secure communication between consensus and execution layers
+readonly DEFAULT_EL_AUTHRPC_PORT=8551
+
+# Variable: DEFAULT_DEFAULT_EL_ETH_PORT
+# Description: Execution layer P2P networking port
+# Default: 30303 (standard Ethereum discovery port)
+# Usage: Peer discovery and block/transaction propagation
+readonly DEFAULT_DEFAULT_EL_ETH_PORT=30303
+
+# Variable: DEFAULT_EL_PROMETHEUS_PORT
+# Description: Execution layer Prometheus metrics port
+# Default: 9101
+# Usage: Exports execution layer metrics for monitoring
+readonly DEFAULT_EL_PROMETHEUS_PORT=9101
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Additional Service Ports
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DEFAULT_BEACON_NODE_API_PORT
+# Description: Beacon node API port (Beacon Chain API spec)
+# Default: 3500
+# Usage: Standard beacon chain API for validator operations
 readonly DEFAULT_BEACON_NODE_API_PORT=3500
+
+# Variable: DEFAULT_GRPC_LADDR_PORT
+# Description: gRPC service port
+# Default: 9090
+# Usage: gRPC API for application-specific queries
 readonly DEFAULT_GRPC_LADDR_PORT=9090
+
+# Variable: DEFAULT_GRPC_PRIVILEGED_LADDR_PORT
+# Description: Privileged gRPC service port
+# Default: 9091
+# Usage: gRPC API with elevated permissions for administrative operations
 readonly DEFAULT_GRPC_PRIVILEGED_LADDR_PORT=9091
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Port Management Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DEFAULT_PORT_INCREMENT
+# Description: Port increment for multi-node setups
+# Default: 100
+# Purpose: Each additional node adds this value to base ports to avoid conflicts
+# Example: Node 1 uses 26657, Node 2 uses 26757, Node 3 uses 26857
+readonly DEFAULT_PORT_INCREMENT=100
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Wallet Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DEFAULT_WALLET_BALANCE
+# Description: Default wallet balance for genesis accounts
+# Default: 1000000000000000000000000000 Wei (1 billion BERA)
+# Purpose: Pre-funded balance for development/testing accounts
+readonly DEFAULT_WALLET_BALANCE=1000000000000000000000000000
+
 # =============================================================================
-# Binary Names
+# [5] BINARIES AND RELEASES
 # =============================================================================
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Binary Executable Names
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: BIN_BEACONKIT
+# Description: Consensus layer binary name
+# Value: "beacond"
+# Purpose: Name of the BeaconKit consensus client executable
 readonly BIN_BEACONKIT="beacond"
+
+# Variable: BIN_BERARETH
+# Description: Execution layer binary name
+# Value: "bera-reth"
+# Purpose: Name of the Bera-Reth execution client executable
 readonly BIN_BERARETH="bera-reth"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Release URLs
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: RELEASE_BERARETH
+# Description: GitHub API URL for Bera-Reth releases
+# Usage: Used by download.sh to fetch latest binary releases
+readonly RELEASE_BERARETH="https://api.github.com/repos/berachain/bera-reth"
+
+# Variable: RELEASE_BEACONKIT
+# Description: GitHub API URL for BeaconKit releases
+# Usage: Used by download.sh to fetch latest binary releases
+readonly RELEASE_BEACONKIT="https://api.github.com/repos/berachain/beacon-kit"
+
+# Variable: REPO_BEACONKIT
+# Description: GitHub raw content URL for BeaconKit test networks
+# Usage: Fetches network-specific configuration files
+readonly REPO_BEACONKIT="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks/80094"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Registry URLs
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: DOCKER_REGISTRY_BERARETH
+# Description: Docker registry URL for Bera-Reth container images
+# Usage: Used for pulling Bera-Reth Docker images (version tags retrieved via API)
+readonly DOCKER_REGISTRY_BERARETH="ghcr.io/berachain/bera-reth"
+
+# Variable: DOCKER_REGISTRY_BEACONKIT
+# Description: Docker registry URL for BeaconKit container images
+# Usage: Used for pulling BeaconKit Docker images (version tags retrieved via API)
+readonly DOCKER_REGISTRY_BEACONKIT="ghcr.io/berachain/beacon-kit"
+
 # =============================================================================
-# Beranodes Directory Structure
+# [6] DIRECTORY STRUCTURE
 # =============================================================================
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Base Directories
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: BERANODES_PATH_DEFAULT
+# Description: Default root directory for all beranode data
+# Default: $(pwd)/beranodes
+# Purpose: Contains all node configurations, binaries, logs, and data
 readonly BERANODES_PATH_DEFAULT="$(pwd)/beranodes"
-readonly BERANODES_PATH_BIN="/bin"
-readonly BERANODES_PATH_TMP="/tmp"
-readonly BERANODES_PATH_LOGS="/logs"
-readonly BERANODES_PATH_NODES="/nodes"
-readonly BERANODES_PATH_RUNS="/runs"
 
-readonly GENESIS_ETH_NAME_DEFAULT="eth-genesis.json"
-readonly GENESIS_BEACON_NAME_DEFAULT="genesis.json"
-readonly SUPPORTED_CAST_VERSION="1.6.0"
-readonly SUPPORTED_TAR_GZ_VERSION="1.34"
-readonly SUPPORTED_CURL_VERSION="8.7.1"
+# Variable: BERANODES_PATH (mutable)
+# Description: Configurable base path for beranodes installation
+# Default: $(pwd)/beranodes (can be overridden by environment variable)
+# Usage: export BERANODES_PATH=/custom/path before running beranode
 BERANODES_PATH=${BERANODES_PATH:-$(pwd)/beranodes}
 
-# =============================================================================
-# Repositories
-# =============================================================================
-readonly RELEASE_BERARETH="https://api.github.com/repos/berachain/bera-reth"
-readonly RELEASE_BEACONKIT="https://api.github.com/repos/berachain/beacon-kit"
-readonly REPO_BEACONKIT="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks/80094"
+# ─────────────────────────────────────────────────────────────────────────────
+# Subdirectory Paths (relative to BERANODES_PATH_DEFAULT)
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: BERANODES_PATH_BIN
+# Description: Binary directory path
+# Value: "/bin"
+# Contents: beacond and bera-reth executables
+readonly BERANODES_PATH_BIN="/bin"
+
+# Variable: BERANODES_PATH_TMP
+# Description: Temporary files directory path
+# Value: "/tmp"
+# Contents: Genesis files, intermediate configs, build artifacts
+readonly BERANODES_PATH_TMP="/tmp"
+
+# Variable: BERANODES_PATH_LOGS
+# Description: Log files directory path
+# Value: "/logs"
+# Contents: Node logs, error logs, debug output
+readonly BERANODES_PATH_LOGS="/logs"
+
+# Variable: BERANODES_PATH_NODES
+# Description: Node data directory path
+# Value: "/nodes"
+# Contents: Per-node subdirectories with chain data, configs
+readonly BERANODES_PATH_NODES="/nodes"
+
+# Variable: BERANODES_PATH_RUNS
+# Description: Runtime process tracking directory path
+# Value: "/runs"
+# Contents: PID files for running nodes
+readonly BERANODES_PATH_RUNS="/runs"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# File Names
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: GENESIS_ETH_NAME_DEFAULT
+# Description: Execution layer genesis file name
+# Value: "eth-genesis.json"
+# Format: Geth/Reth-compatible JSON genesis specification
+readonly GENESIS_ETH_NAME_DEFAULT="eth-genesis.json"
+
+# Variable: GENESIS_BEACON_NAME_DEFAULT
+# Description: Consensus layer genesis file name
+# Value: "genesis.json"
+# Format: BeaconKit/Tendermint genesis specification
+readonly GENESIS_BEACON_NAME_DEFAULT="genesis.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dependency Version Requirements
+# ─────────────────────────────────────────────────────────────────────────────
+# Variable: SUPPORTED_CAST_VERSION
+# Description: Minimum required cast (Foundry) version
+# Value: "1.6.0"
+# Purpose: Used for key generation and Ethereum utilities
+readonly SUPPORTED_CAST_VERSION="1.6.0"
+
+# Variable: SUPPORTED_TAR_GZ_VERSION
+# Description: Minimum required tar version
+# Value: "1.34"
+# Purpose: Binary extraction from GitHub releases
+readonly SUPPORTED_TAR_GZ_VERSION="1.34"
+
+# Variable: SUPPORTED_CURL_VERSION
+# Description: Minimum required curl version
+# Value: "8.7.1"
+# Purpose: Downloading binaries and artifacts
+readonly SUPPORTED_CURL_VERSION="8.7.1"
 
 # =============================================================================
 # Default Genesis Contracts
@@ -261,7 +548,7 @@ readonly APPTOML_TELEMETRY_ENABLE_HOSTNAME=true
 readonly APPTOML_TELEMETRY_ENABLE_HOSTNAME_LABEL=true
 readonly APPTOML_TELEMETRY_ENABLE_SERVICE_LABEL=true
 readonly APPTOML_TELEMETRY_PROMETHEUS_RETENTION_TIME=60
-readonly APPTOML_TELEMETRY_GLOBAL_LABELS=() # Ex: [["chain_id", "cosmoshub-1"]]
+readonly APPTOML_TELEMETRY_GLOBAL_LABELS="" # Ex: "chain_id,cosmoshub-1"
 readonly APPTOML_TELEMETRY_METRICS_SINK=""
 readonly APPTOML_TELEMETRY_STATSD_ADDR=""
 readonly APPTOML_TELEMETRY_DATADOG_HOSTNAME="my_beacond_node"

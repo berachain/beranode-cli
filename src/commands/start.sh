@@ -1,5 +1,5 @@
 # =============================================================================
-# Start Command - Beranode CLI v0.6.0
+# Start Command - Beranode CLI v0.7.1
 # =============================================================================
 # This module implements the 'start' command for the Beranode CLI tool.
 # It orchestrates the startup of Berachain nodes (validators, full nodes, or
@@ -18,7 +18,7 @@
 #
 # VERSION HISTORY:
 # ----------------
-# v0.6.0 - Current version
+# v0.7.1 - Current version
 #        - Added --help command support
 #        - Enhanced version management with semantic versioning
 #        - Improved error handling and validation
@@ -83,22 +83,15 @@ cmd_start() {
 	while [[ $# -gt 0 ]]; do
 		case $1 in
 		--beranodes-dir)
-			if [[ -z "$2" ]] || [[ "$2" == --* ]]; then
-				log_warn "--beranodes-dir not provided or missing argument. Defaulting to: $beranodes_dir"
-				shift
-			else
-				beranodes_dir="$2"
-				shift 2
-			fi
+			beranodes_dir=$(parse_beranodes_dir "$2")
+			shift 2
 			;;
 		--help | -h)
 			show_start_help
 			return 0
 			;;
 		*)
-			log_error "Unknown option: $1"
-			show_start_help
-			return 1
+			check_unknown_option "$1" "show_start_help" || return 1
 			;;
 		esac
 	done
@@ -148,50 +141,52 @@ cmd_start() {
 
 	local config_json_path="${beranodes_dir}/beranodes.config.json"
 
+	# Load entire configuration into memory (single jq call replaces 80+ separate calls)
+	load_config "${config_json_path}" || return 1
+
 	# Binary paths
-	local beranodes_dir=$(jq -r '.beranode_dir' "${config_json_path}")
+	local beranodes_dir=$(get_config "beranode_dir")
 	local bin_beacond="$beranodes_dir${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
 	local bin_bera_reth="$beranodes_dir${BERANODES_PATH_BIN}/${BIN_BERARETH}"
 
 	# Node identity and network configuration
-	local moniker=$(jq -r '.moniker' "${config_json_path}")
-	local network=$(jq -r '.network' "${config_json_path}")
+	local moniker=$(get_config "moniker")
+	local network=$(get_config "network")
 
 	# Node count configuration
-	local validators=$(jq -r '.validators' "${config_json_path}")
-	local full_nodes=$(jq -r '.full_nodes' "${config_json_path}")
-	local pruned_nodes=$(jq -r '.pruned_nodes' "${config_json_path}")
-	local total_nodes=$(jq -r '.total_nodes' "${config_json_path}")
+	local validators=$(get_config "validators")
+	local full_nodes=$(get_config "full_nodes")
+	local pruned_nodes=$(get_config "pruned_nodes")
+	local total_nodes=$(get_config "total_nodes")
 
 	# Directory and operational settings
-	local beranode_dir=$(jq -r '.beranode_dir' "${config_json_path}")
-	local skip_genesis=$(jq -r '.skip_genesis' "${config_json_path}")
-	local force=$(jq -r '.force' "${config_json_path}")
-	local mode=$(jq -r '.mode' "${config_json_path}")
+	local beranode_dir=$(get_config "beranode_dir")
+	local skip_genesis=$(get_config "skip_genesis")
+	local force=$(get_config "force")
+	local mode=$(get_config "mode")
 
 	# Wallet configuration
-	local wallet_private_key=$(jq -r '.wallet_private_key' "${config_json_path}")
-	local wallet_address=$(jq -r '.wallet_address' "${config_json_path}")
+	local wallet_private_key=$(get_config "wallet_private_key")
+	local wallet_address=$(get_config "wallet_address")
 
 	# Node-specific configurations (array of node objects)
-	local nodes=$(jq -r '.nodes' "${config_json_path}")
-	local nodes_count=$(echo "${nodes}" | jq -r '. | length')
+	# All node configs were loaded by load_config() above with keys like "nodes.0.ethrpc_port"
+	local nodes_count=$(get_config "total_nodes" "0")
 
 	# Get all ports and check if they are currently in use
 	local ports=()
 	for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
-		local json=$(echo "${nodes}" | jq -r ".[$node_index]")
-		local ethrpc_port=$(echo "${json}" | jq -r '.ethrpc_port')
-		local ethp2p_port=$(echo "${json}" | jq -r '.ethp2p_port')
-		local ethproxy_port=$(echo "${json}" | jq -r '.ethproxy_port')
-		local el_ethrpc_port=$(echo "${json}" | jq -r '.el_ethrpc_port')
-		local el_authrpc_port=$(echo "${json}" | jq -r '.el_authrpc_port')
-		local el_eth_port=$(echo "${json}" | jq -r '.el_eth_port')
-		local el_prometheus_port=$(echo "${json}" | jq -r '.el_prometheus_port')
-		local cl_prometheus_port=$(echo "${json}" | jq -r '.cl_prometheus_port')
-		local beacond_node_port=$(echo "${json}" | jq -r '.beacond_node_port')
-		local configtoml_grpc_laddr=$(echo "${json}" | jq -r '.configtoml_grpc_laddr')
-		local configtoml_grpc_privileged_laddr=$(echo "${json}" | jq -r '.configtoml_grpc_privileged_laddr')
+		local ethrpc_port=$(get_config "nodes.${node_index}.ethrpc_port")
+		local ethp2p_port=$(get_config "nodes.${node_index}.ethp2p_port")
+		local ethproxy_port=$(get_config "nodes.${node_index}.ethproxy_port")
+		local el_ethrpc_port=$(get_config "nodes.${node_index}.el_ethrpc_port")
+		local el_authrpc_port=$(get_config "nodes.${node_index}.el_authrpc_port")
+		local el_eth_port=$(get_config "nodes.${node_index}.el_eth_port")
+		local el_prometheus_port=$(get_config "nodes.${node_index}.el_prometheus_port")
+		local cl_prometheus_port=$(get_config "nodes.${node_index}.cl_prometheus_port")
+		local beacond_node_port=$(get_config "nodes.${node_index}.beacond_node_port")
+		local configtoml_grpc_laddr=$(get_config "nodes.${node_index}.configtoml_grpc_laddr")
+		local configtoml_grpc_privileged_laddr=$(get_config "nodes.${node_index}.configtoml_grpc_privileged_laddr")
 		ports[${node_index}]="${ethrpc_port} ${ethp2p_port} ${ethproxy_port} ${el_ethrpc_port} ${el_authrpc_port} ${el_eth_port} ${el_prometheus_port} ${cl_prometheus_port} ${beacond_node_port} ${configtoml_grpc_laddr} ${configtoml_grpc_privileged_laddr}"
 	done
 	log_info "Checking if ports are in use:\n${ports[*]}\n"
@@ -205,13 +200,6 @@ cmd_start() {
 		fi
 	done
 	log_success "All ports are available"
-
-	# -------------------------------------------------------------------------
-	# [DEBUG] Node Configuration Inspection (Currently Disabled)
-	# -------------------------------------------------------------------------
-	# Uncomment this section to debug individual node configurations.
-	# Useful for troubleshooting port conflicts or misconfigurations.
-	# -------------------------------------------------------------------------
 
 	# -------------------------------------------------------------------------
 	# [STEP 5] Network-Specific Initialization
@@ -234,6 +222,19 @@ cmd_start() {
 
 		if [[ "${mode}" == "local" ]]; then
 			log_info "Starting Beranode in local mode"
+
+			# Check if logs directory has existing files and prompt user
+			local logs_dir="${beranode_dir}${BERANODES_PATH_LOGS}"
+			if [ -d "${logs_dir}" ] && [ "$(ls -A "${logs_dir}")" ]; then
+				log_warn "Existing log files found in ${logs_dir}"
+				read -p "Do you want to remove existing log files? (y/n) " remove_logs
+				if [ "${remove_logs}" == "y" ]; then
+					rm -f "${logs_dir}"/*
+					log_info "Existing log files removed"
+				else
+					log_info "Keeping existing log files"
+				fi
+			fi
 
 			# Do a a check if `beranode_dir/nodes` has any directories, if so, ask if the user wants to delete them
 			if [ -d "${beranode_dir}/nodes" ] && [ "$(ls -A "${beranode_dir}/nodes")" ]; then
@@ -258,6 +259,9 @@ cmd_start() {
 			local wallet_address=$(jq -r '.wallet_address' "${config_json_path}")
 			local wallet_private_key=$(jq -r '.wallet_private_key' "${config_json_path}")
 			local wallet_balance=$(jq -r '.wallet_balance' "${config_json_path}")
+
+			# Load all nodes from config
+			local nodes=$(jq -c '.nodes' "${config_json_path}")
 
 			# get all seeds and peers
 			local seeds=()
@@ -473,7 +477,7 @@ cmd_start() {
 				local configtoml_instrumentation_namespace=$(jq -r '.configtoml.instrumentation_namespace' "${config_json_path}")
 
 				# Make node directories
-				local node_dir="${beranodes_dir}${BERANODES_PATH_NODES}/${role}-${node_index}"
+				local node_dir="${beranodes_dir}${BERANODES_PATH_NODES}/${node_index}-${role}"
 				local beacond_dir="${node_dir}/beacond"
 				local bera_reth_dir="${node_dir}/bera-reth"
 				mkdir -p "${node_dir}"
@@ -926,16 +930,28 @@ EOF
 
 			# Start the nodes and record their pids
 			print_header "Starting nodes"
+      local nodes=$(jq -r '.nodes' "${config_json_path}")
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+				echo "--------------------------------"
+				echo "Starting node $node_index"
+				echo "--------------------------------"
+
 				# beacond
 				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
 				local moniker=$(echo "${node_json}" | jq -r '.moniker')
-				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${role}-${node_index}"
+        local role=$(echo "${node_json}" | jq -r '.role')
+				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${node_index}-${role}"
 				local beacond_dir="${node_dir}/beacond"
 				local bera_reth_dir="${node_dir}/bera-reth"
 				local jwt=$(echo "${node_json}" | jq -r '.beacond_config.jwt')
-				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-beacond.log" &
-				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-beacond.pid"
+				# Get base moniker and abbreviate role for log file naming
+				local base_moniker=$(jq -r '.moniker' "${config_json_path}")
+				local role_short="${role}"
+				if [[ "${role}" == "validator" ]]; then
+					role_short="val"
+				fi
+				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
+				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
 				log_success "✔ Beacond node started"
 
 				# bera-reth
@@ -1001,11 +1017,15 @@ EOF
 					--ws.addr=0.0.0.0 \
 					--ws.port="${el_ws_port}" \
 					--ws.origins="*" \
-					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${moniker}-bera-reth.log" &
+					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
 				local pid=$!
-				echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${moniker}-bera-reth.pid"
+				echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
 				log_success "✔ Bera-reth node started"
 			done
+    elif [[ "$mode" == "docker" ]]; then
+      log_info "Starting Beranode in docker mode"
+      log_warn "Docker mode is not yet supported. Docker integration is coming soon."
+      return 1
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")
 			log_error "Unsupported mode: ${mode}"

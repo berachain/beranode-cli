@@ -11,7 +11,7 @@
 # [3] generate_genesis_file        - Creates basic beacon chain genesis file
 # [4] generate_beacond_genesis     - Comprehensive beacon genesis with deposits
 #
-# VERSION CONTEXT (v0.6.0):
+# VERSION CONTEXT (v0.7.1):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)
@@ -251,8 +251,10 @@ generate_eth_genesis_file() {
 	local eth_genesis_beacon_deposit_code="$ETH_GENESIS_BEACON_DEPOSIT_CODE"
 	local eth_genesis_beacon_deposit_balance="$ETH_GENESIS_BEACON_DEPOSIT_BALANCE"
 	local eth_genesis_beacon_deposit_nonce="$ETH_GENESIS_BEACON_DEPOSIT_NONCE"
-	local eth_genesis_beacon_deposit_storage_key="$ETH_GENESIS_BEACON_DEPOSIT_STORAGE_KEY"
-	local eth_genesis_beacon_deposit_storage_value="$ETH_GENESIS_BEACON_DEPOSIT_STORAGE_VALUE"
+	local -a eth_genesis_beacon_deposit_storage_key=()
+	IFS=',' read -ra eth_genesis_beacon_deposit_storage_key <<<"$ETH_GENESIS_BEACON_DEPOSIT_STORAGE_KEY"
+	local -a eth_genesis_beacon_deposit_storage_value=()
+	IFS=',' read -ra eth_genesis_beacon_deposit_storage_value <<<"$ETH_GENESIS_BEACON_DEPOSIT_STORAGE_VALUE"
 
 	# -------------------------------------------------------------------------
 	# Section 1.9: Custom Contract Deployments
@@ -898,22 +900,22 @@ generate_eth_genesis_file() {
 			contract_alloc_lines+=("${indent}\"${eth_genesis_beacon_deposit_address}\": {")
 			contract_alloc_lines+=("${indent}  \"balance\": \"${eth_genesis_beacon_deposit_balance}\",")
 			contract_alloc_lines+=("${indent}  \"nonce\": \"${eth_genesis_beacon_deposit_nonce}\",")
-			if [[ -n "${eth_genesis_beacon_deposit_storage_key}" ]]; then
-				contract_alloc_lines+=("${indent}  \"code\": \"${eth_genesis_beacon_deposit_code}\",")
-				contract_alloc_lines+=("${indent}  \"storage\": {")
-				# Split storage keys/values on comma if string contains ',' (to support "0x1,0x2" format)
-				storage_keys=()
-				storage_values=()
-				if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_key[0]}" == *,* ]]; then
-					IFS=',' read -ra storage_keys <<<"${eth_genesis_beacon_deposit_storage_key[0]}"
-				else
-					storage_keys=("${eth_genesis_beacon_deposit_storage_key[@]}")
-				fi
-				if [[ "${#eth_genesis_beacon_deposit_storage_value[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_value[0]}" == *,* ]]; then
-					IFS=',' read -ra storage_values <<<"${eth_genesis_beacon_deposit_storage_value[0]}"
-				else
-					storage_values=("${eth_genesis_beacon_deposit_storage_value[@]}")
-				fi
+		if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -gt 0 && -n "${eth_genesis_beacon_deposit_storage_key[0]}" ]]; then
+			contract_alloc_lines+=("${indent}  \"code\": \"${eth_genesis_beacon_deposit_code}\",")
+			contract_alloc_lines+=("${indent}  \"storage\": {")
+			# Split storage keys/values on comma if string contains ',' (to support "0x1,0x2" format)
+			storage_keys=()
+			storage_values=()
+			if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_key[0]}" == *,* ]]; then
+				IFS=',' read -ra storage_keys <<<"${eth_genesis_beacon_deposit_storage_key[0]}"
+			else
+				storage_keys=("${eth_genesis_beacon_deposit_storage_key[@]}")
+			fi
+			if [[ "${#eth_genesis_beacon_deposit_storage_value[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_value[0]}" == *,* ]]; then
+				IFS=',' read -ra storage_values <<<"${eth_genesis_beacon_deposit_storage_value[0]}"
+			else
+				storage_values=("${eth_genesis_beacon_deposit_storage_value[@]}")
+			fi
 
 				storage_len=${#storage_keys[@]}
 				for i in "${!storage_keys[@]}"; do
@@ -1527,13 +1529,17 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 	fi
 
 	# Iterate through all the nodes to find role == validator
-	for i in $(seq 1 ${nodes_count}); do
-		role=$(echo "$node_json" | jq -r '.role')
-		if [[ "$role" == "validator" ]]; then
-			node_json=$(echo "$nodes_json" | jq ".[$i-1]")
+	local node_json=""
+	local moniker=""
+	local jwt=""
+	for i in $(seq 0 $((nodes_count - 1))); do
+		local current_node=$(echo "$nodes_json" | jq ".[$i]")
+		local current_role=$(echo "$current_node" | jq -r '.role')
+		if [[ "$current_role" == "validator" ]]; then
+			node_json="$current_node"
 			moniker=$(echo "$node_json" | jq -r '.moniker')
-			role=$(echo "$node_json" | jq -r '.role')
-			jwt=$(echo "$node_json" | jq -r '.jwt // empty')
+			jwt=$(echo "$node_json" | jq -r '.beacond_config.jwt // empty')
+			break
 		fi
 	done
 
@@ -1542,24 +1548,24 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 		return 1
 	fi
 
-	# node key
-	node_key_type=$(echo "$node_json" | jq -r '.node_key.type // empty')
-	node_key_value=$(echo "$node_json" | jq -r '.node_key.value // empty')
+	# node key (stored under beacond_config.node_key.priv_key)
+	node_key_type=$(echo "$node_json" | jq -r '.beacond_config.node_key.priv_key.type // empty')
+	node_key_value=$(echo "$node_json" | jq -r '.beacond_config.node_key.priv_key.value // empty')
 
-	# priv validator key
-	priv_validator_key_address=$(echo "$node_json" | jq -r '.priv_validator_key.address // empty')
-	priv_validator_key_pubkey_type=$(echo "$node_json" | jq -r '.priv_validator_key.pub_key.type // empty')
-	priv_validator_key_pubkey_value=$(echo "$node_json" | jq -r '.priv_validator_key.pub_key.value // empty')
-	priv_validator_key_privkey_type=$(echo "$node_json" | jq -r '.priv_validator_key.priv_key.type // empty')
-	priv_validator_key_privkey_value=$(echo "$node_json" | jq -r '.priv_validator_key.priv_key.value // empty')
+	# priv validator key (stored under beacond_config.priv_validator_key)
+	priv_validator_key_address=$(echo "$node_json" | jq -r '.beacond_config.priv_validator_key.address // empty')
+	priv_validator_key_pubkey_type=$(echo "$node_json" | jq -r '.beacond_config.priv_validator_key.pub_key.type // empty')
+	priv_validator_key_pubkey_value=$(echo "$node_json" | jq -r '.beacond_config.priv_validator_key.pub_key.value // empty')
+	priv_validator_key_privkey_type=$(echo "$node_json" | jq -r '.beacond_config.priv_validator_key.priv_key.type // empty')
+	priv_validator_key_privkey_value=$(echo "$node_json" | jq -r '.beacond_config.priv_validator_key.priv_key.value // empty')
 
-	# comet address
-	comet_address=$(echo "$node_json" | jq -r '.comet_address // empty')
-	comet_pubkey=$(echo "$node_json" | jq -r '.comet_pubkey // empty')
-	eth_beacon_pubkey=$(echo "$node_json" | jq -r '.eth_beacon_pubkey // empty')
+	# comet address (stored under beacond_config)
+	comet_address=$(echo "$node_json" | jq -r '.beacond_config.comet_address // empty')
+	comet_pubkey=$(echo "$node_json" | jq -r '.beacond_config.comet_pubkey // empty')
+	eth_beacon_pubkey=$(echo "$node_json" | jq -r '.beacond_config.eth_beacon_pubkey // empty')
 
-	# deposit amount
-	deposit_amount=$(echo "$node_json" | jq -r '.deposit_amount // empty')
+	# deposit amount (stored under beacond_config)
+	deposit_amount=$(echo "$node_json" | jq -r '.beacond_config.deposit_amount // empty')
 
 	# make tmp/beacond directory
 	mkdir -p "${config_dir}${BERANODES_PATH_TMP}/beacond"

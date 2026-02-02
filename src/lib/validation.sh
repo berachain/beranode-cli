@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 ################################################################################
 # validation.sh - Beranode Config Validation Functions
 ################################################################################
@@ -193,7 +194,7 @@ validate_mode() {
 # Returns: 0 if valid, 1 if invalid
 validate_role() {
 	local value="$1"
-	[[ "$value" =~ ^(validator|full_node|pruned_node)$ ]]
+	[[ "$value" =~ ^(validator|rpc-full|rpc-pruned)$ ]]
 }
 
 ################################################################################

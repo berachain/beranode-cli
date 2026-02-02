@@ -177,11 +177,13 @@ The beranode CLI creates the following directory structure:
 beranodes/
 ├── bin/          # Binary files (beacond, bera-reth)
 ├── tmp/          # Temporary files
-├── log/          # Log files
+├── logs/         # Log files (e.g., silent-smile-forest-0-val-beacond.log)
+├── runs/         # PID files for running nodes
 └── nodes/        # Node configurations
-    ├── val-1/    # Validator node 1
-    ├── val-2/    # Validator node 2
-    └── ...
+    ├── 0-validator       # Validator node 0
+    ├── 1-validator       # Validator node 1
+    ├── 2-rpc-full        # RPC full node 2
+    └── 3-rpc-pruned      # RPC pruned node 3
 ```
 
 ## Examples
@@ -285,6 +287,91 @@ Make sure the required binaries are available:
 ```bash
 which beacond
 which bera-reth
+```
+
+## Testing
+
+The [tests/](tests/) directory contains a comprehensive test suite for validating the beranode CLI functionality.
+
+### Test Framework
+
+The test suite uses a custom lightweight bash testing framework ([tests/test_framework.sh](tests/test_framework.sh)) that provides:
+
+- **Assertion Functions**: `assert_equals`, `assert_success`, `assert_failure`, `assert_contains`, `assert_not_contains`, `assert_file_exists`, `assert_dir_exists`, `assert_empty`, `assert_not_empty`
+- **Test Organization**: Group tests into suites with `test_suite "Suite Name"`
+- **Result Reporting**: Colored output with pass/fail statistics
+- **Test Management**: Skip tests when needed with `skip_test`
+
+### Available Tests
+
+- **[test_validation.sh](tests/test_validation.sh)** - Tests for validation functions including:
+  - Port validation (valid ranges, edge cases)
+  - Network name validation
+  - Boolean validation (true/false)
+  - Integer validation
+  - Ethereum address validation (0x + 40 hex chars)
+  - Private key validation (0x + 64 hex chars)
+  - URL validation (http, https, tcp, ws, wss)
+  - Moniker validation (length and format)
+  - Duration validation (s, m, h, ms, us, ns)
+
+### Running Tests
+
+Execute all tests from the tests directory:
+
+```bash
+cd tests
+./test_validation.sh
+```
+
+Or run from the project root:
+
+```bash
+bash tests/test_validation.sh
+```
+
+### Test Output Example
+
+```
+=== Test Suite: Port Validation ===
+  ✓ Port 1 is valid
+  ✓ Port 8545 is valid
+  ✓ Port 65535 is valid (max)
+  ✓ Port 0 is invalid
+  ✓ Port 65536 is invalid (over max)
+
+========================================
+Test Results
+========================================
+Total:  45
+Passed: 45
+Failed: 0
+========================================
+✓ All tests passed!
+```
+
+### Writing New Tests
+
+To add new tests, create a new test file or extend existing ones:
+
+1. Source the test framework: `source test_framework.sh`
+2. Source any modules you need to test
+3. Organize tests with `test_suite "Your Suite Name"`
+4. Use assertion functions to validate behavior
+5. Call `print_results` at the end
+
+Example test structure:
+
+```bash
+#!/usr/bin/env bash
+source test_framework.sh
+source ../src/lib/your_module.sh
+
+test_suite "Feature Tests"
+assert_success 'your_function "valid input"' "Should handle valid input"
+assert_failure 'your_function "invalid input"' "Should reject invalid input"
+
+print_results
 ```
 
 ## Versioning

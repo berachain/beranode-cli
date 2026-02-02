@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # =============================================================================
 # BERANODE INIT COMMAND
 # =============================================================================
 # File: src/commands/init.sh
-# Version: Compatible with Beranode CLI v0.6.0
+# Version: Compatible with Beranode CLI v0.7.1
 # Description: Initializes Berachain node configurations including validator,
 #              full nodes, and pruned nodes with comprehensive configuration
 #              management for client.toml, app.toml, and config.toml files.
@@ -61,9 +62,9 @@
 #      └─ Generate beacond genesis.json
 #
 # =============================================================================
-# RELATIONSHIP TO CURRENT VERSION (v0.6.0)
+# RELATIONSHIP TO CURRENT VERSION (v0.7.1)
 # =============================================================================
-# This init.sh file is part of the Beranode CLI v0.6.0 and works in
+# This init.sh file is part of the Beranode CLI v0.7.1 and works in
 # conjunction with:
 #
 # - src/lib/constants.sh     : Provides network constants, default ports, and
@@ -381,6 +382,8 @@ cmd_init() {
 	local full_nodes=0
 	local pruned_nodes=0
 	local docker_mode=false
+  local docker_tag_beacond="latest"
+  local docker_tag_berareth="latest"
 	local mode="local"
 	local wallet_private_key=""
 	local wallet_address=""
@@ -480,15 +483,15 @@ cmd_init() {
 	local configtoml_rpc_unsafe="${CONFIGTOML_RPC_UNSAFE}"
 	local configtoml_rpc_cors_allowed_origins="$(
 		IFS=,
-		echo "${CONFIGTOML_RPC_CORS_ALLOWED_ORIGINS[*]}"
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_ORIGINS[*]+"${CONFIGTOML_RPC_CORS_ALLOWED_ORIGINS[*]}"}"
 	)"
 	local configtoml_rpc_cors_allowed_methods="$(
 		IFS=,
-		echo "${CONFIGTOML_RPC_CORS_ALLOWED_METHODS[*]}"
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_METHODS[*]+"${CONFIGTOML_RPC_CORS_ALLOWED_METHODS[*]}"}"
 	)"
 	local configtoml_rpc_cors_allowed_headers="$(
 		IFS=,
-		echo "${CONFIGTOML_RPC_CORS_ALLOWED_HEADERS[*]}"
+		echo "${CONFIGTOML_RPC_CORS_ALLOWED_HEADERS[*]+"${CONFIGTOML_RPC_CORS_ALLOWED_HEADERS[*]}"}"
 	)"
 	local configtoml_rpc_max_open_connections="${CONFIGTOML_RPC_MAX_OPEN_CONNECTIONS}"
 	local configtoml_rpc_max_subscription_clients="${CONFIGTOML_RPC_MAX_SUBSCRIPTION_CLIENTS}"
@@ -610,7 +613,7 @@ cmd_init() {
       if [[ -n "$2" ]]; then
         check_beacond_version="$2"
         if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.6.0, v0.6.0-rc2)"
+          log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
           log_warn "defaulting to ${beacond_version}..."
         else
           beacond_version="$check_beacond_version"
@@ -626,7 +629,7 @@ cmd_init() {
       if [[ -n "$2" ]]; then
         check_berareth_version="$2"
         if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.6.0, v0.6.0-rc2)"
+          log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
           log_warn "defaulting to ${berareth_version}..."
         else
           berareth_version="$check_berareth_version"
@@ -639,19 +642,62 @@ cmd_init() {
       fi
       ;;
 		--beranodes-dir)
-			if [[ -n "$2" ]]; then
-				BERANODES_PATH="$2"
-				shift 2
-			else
-				log_warn "--beranodes-dir is not set. defaulting to ${BERANODES_PATH:-$(pwd)/beranodes}"
-				shift
-			fi
+			BERANODES_PATH=$(parse_beranodes_dir "$2")
+			shift 2
 			;;
 		--docker)
 			docker_mode=true
 			mode="docker"
+			# Check if Docker is installed
+			if ! command -v docker &> /dev/null; then
+				log_error "Docker is not installed or not found in PATH. Please install Docker to continue."
+				exit 1
+			fi
+
+			# Check if Docker daemon is running
+			if ! docker info &> /dev/null; then
+				log_error "Docker daemon is not running. Please start Docker to continue."
+				exit 1
+			fi
+
+			# Check Docker version is at least 20.10.0
+			docker_version=$(docker version --format '{{.Server.Version}}')
+			if [[ -z "$docker_version" ]]; then
+				log_warn "Could not determine Docker version. Proceeding, but issues may occur."
+			else
+				if [[ "$docker_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+					docker_major="${BASH_REMATCH[1]}"
+					docker_minor="${BASH_REMATCH[2]}"
+					docker_patch="${BASH_REMATCH[3]}"
+					# Compare version (minimum required: 20.10.0)
+					if (( docker_major < 20 )) || { (( docker_major == 20 )) && (( docker_minor < 10 )); }; then
+						log_error "Docker version 20.10.0 or newer is required. Current version: $docker_version"
+						exit 1
+					fi
+				else
+					log_warn "Could not parse Docker version: $docker_version. Proceeding, but issues may occur."
+				fi
+			fi
 			shift
 			;;
+    --docker-tag-berareth)
+      if [[ -n "$2" ]]; then
+        docker_tag_berareth="$2"
+        shift 2
+      else
+        log_warn "--docker-tag-berareth is not set. defaulting to latest"
+        docker_tag_berareth="latest"
+      fi
+      ;;
+    --docker-tag-beacond)
+      if [[ -n "$2" ]]; then
+        docker_tag_beacond="$2"
+        shift 2
+      else
+        log_warn "--docker-tag-beacond is not set. defaulting to latest"
+        docker_tag_beacond="latest"
+      fi
+      ;;
 		--moniker)
 			if [[ -n "$2" ]]; then
 				moniker="$2"
@@ -2256,74 +2302,129 @@ cmd_init() {
 	# =========================================================================
 	# Verify beacond and bera-reth binaries exist and are executable
 
-	missing_binaries=0
-	# - beacond
-  is_beacond_installed=false
-	if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
-		log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
-	else
-		# Check if 'beacond version' command executes successfully
-		beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
-		if [[ $? -eq 0 ]]; then
-			log_success "'${BIN_BEACONKIT} version' works as expected."
-			log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
-      is_beacond_installed=true
-		else
-			log_error "'${BIN_BEACONKIT} version' did not work as expected."
-		fi
-	fi
+  if [[ "$mode" == "local" ]]; then
+    missing_binaries=0
+    # - beacond
+    is_beacond_installed=false
+    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
+      log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
+    else
+      # Check if 'beacond version' command executes successfully
+      beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
+      if [[ $? -eq 0 ]]; then
+        log_success "'${BIN_BEACONKIT} version' works as expected."
+        log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
+        is_beacond_installed=true
+      else
+        log_error "'${BIN_BEACONKIT} version' did not work as expected."
+      fi
+    fi
 
-  if [[ "$is_beacond_installed" == false ]]; then
-    log_info "Installing beacond binary..."
-    download_beranodes_binary \
-      --config-dir "${BERANODES_PATH}" \
-      --binary-to-download "${BIN_BEACONKIT}" \
-      --version-tag "latest"
-  fi
+    if [[ "$is_beacond_installed" == false ]]; then
+      log_info "Installing beacond binary..."
+      download_beranodes_binary \
+        --config-dir "${BERANODES_PATH}" \
+        --binary-to-download "${BIN_BEACONKIT}" \
+        --version-tag "latest"
+    fi
 
-	# - berareth
-  is_berareth_installed=false
-	if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
-		log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
-		missing_binaries=1
-	else
-		# Check if 'berareth version' command executes successfully
-		bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
-		if [[ $? -eq 0 ]]; then
-			log_success "'${BIN_BERARETH} --version' works as expected."
-			log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
-      is_berareth_installed=true
-		else
-			log_error "'${BIN_BERARETH} --version' did not work as expected."
-		fi
-	fi
+    # - berareth
+    is_berareth_installed=false
+    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
+      log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
+      missing_binaries=1
+    else
+      # Check if 'berareth version' command executes successfully
+      bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
+      if [[ $? -eq 0 ]]; then
+        log_success "'${BIN_BERARETH} --version' works as expected."
+        log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
+        is_berareth_installed=true
+      else
+        log_error "'${BIN_BERARETH} --version' did not work as expected."
+      fi
+    fi
 
-  if [[ "$is_berareth_installed" == false ]]; then
-    log_info "Installing bera-reth binary..."
-    download_beranodes_binary \
-      --config-dir "${BERANODES_PATH}" \
-      --binary-to-download "${BIN_BERARETH}" \
-      --version-tag "latest"
+    if [[ "$is_berareth_installed" == false ]]; then
+      log_info "Installing bera-reth binary..."
+      download_beranodes_binary \
+        --config-dir "${BERANODES_PATH}" \
+        --binary-to-download "${BIN_BERARETH}" \
+        --version-tag "latest"
+    fi
+
+  elif [[ "$mode" == "docker" ]]; then
+    # Check for existing bera-reth docker image
+    bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
+    if [[ -n "$bera_reth_image" ]]; then
+      bera_reth_tag=$(echo "$bera_reth_image" | awk -F: '{print $2}')
+      log_success "Found existing bera-reth docker image: $bera_reth_image (tag: $bera_reth_tag)"
+    else
+      log_info "No bera-reth-docker image found. Downloading '${docker_tag_berareth}'..."
+      download_beranodes_docker_image --binary-to-download "${BIN_BERARETH}" --version-tag "${docker_tag_berareth}"
+    fi
+
+    # Check for existing beacond docker image
+    beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'beacond-docker' || true)
+    if [[ -n "$beacond_image" ]]; then
+      beacond_tag=$(echo "$beacond_image" | awk -F: '{print $2}')
+      log_success "Found existing beacond docker image: $beacond_image (tag: $beacond_tag)"
+    else
+      log_info "No beacond-docker image found. Downloading '${docker_tag_beacond}..."
+      download_beranodes_docker_image --binary-to-download "${BIN_BEACONKIT}" --version-tag "${docker_tag_beacond}"
+    fi
   fi
 
 	# =========================================================================
 	# [7] WALLET GENERATION
 	# =========================================================================
-	# Generate EVM private key and derive wallet address
-	# TODO: refactor this so that if an existing wallet is provided, exclude this
-	wallet_private_key=$(generate_evm_private_key)
-	if [[ $? -eq 0 ]]; then
-		log_success "Wallet private key generated:\n${wallet_private_key}"
+	# Wallet generation or use existing
+	if [[ -n "${wallet_address:-}" ]]; then
+		# --wallet-address was supplied; validate it and optionally use private key if provided
+
+		# Validate that the address starts with 0x and is 42 chars (including 0x)
+		if [[ ! "${wallet_address}" =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+			log_error "Provided wallet address (${wallet_address}) is not in the correct format (should start with 0x and be 42 characters long)."
+			return 1
+		else
+			log_success "Using provided wallet address:\n${wallet_address}"
+		fi
+
+		# Optionally read wallet private key
+		if [[ -n "${wallet_private_key:-}" ]]; then
+			# Use cast to derive address from the provided private key and compare
+			if command -v cast >/dev/null 2>&1; then
+				derived_address=$(cast wallet address "${wallet_private_key}" 2>/dev/null)
+				if [[ "$derived_address" == "${wallet_address}" ]]; then
+					log_success "Using provided wallet private key. Address matches provided wallet address."
+				else
+					log_error "Provided private key does NOT match the provided wallet address.\nProvided address: ${wallet_address}\nDerived address from private key: ${derived_address}\nPlease check both your private key and wallet address."
+					return 1
+				fi
+			else
+				log_warn "cast command not found. Skipping private key and address validation."
+				log_success "Using provided wallet private key."
+			fi
+		else
+			wallet_private_key=""
+			log_warn "No wallet private key supplied; proceeding with only public address."
+		fi
 	else
-		log_error "Failed to generate wallet private key."
-		return 1
-	fi
-	wallet_address=$(get_evm_address_from_private_key "${wallet_private_key}")
-	if [[ $? -eq 0 ]]; then
-		log_success "Wallet address generated:\n${wallet_address}"
-	else
-		log_error "Failed to generate wallet address."
-		return 1
+		# No wallet address supplied, must generate both
+		wallet_private_key=$(generate_evm_private_key)
+		if [[ $? -eq 0 ]]; then
+			log_success "Wallet private key generated:\n${wallet_private_key}"
+		else
+			log_error "Failed to generate wallet private key."
+			return 1
+		fi
+		wallet_address=$(get_evm_address_from_private_key "${wallet_private_key}")
+		if [[ $? -eq 0 ]]; then
+			log_success "Wallet address generated:\n${wallet_address}"
+		else
+			log_error "Failed to generate wallet address."
+			return 1
+		fi
 	fi
 
 	# =========================================================================
@@ -2379,10 +2480,8 @@ cmd_init() {
 		node_cl_prometheus_port=${DEFAULT_CL_PROMETHEUS_PORT}
 		node_beacond_node_port=${DEFAULT_BEACON_NODE_API_PORT}
 		node_port_increment=${DEFAULT_PORT_INCREMENT}
-		#
 		node_configtoml_grpc_laddr="${DEFAULT_GRPC_LADDR_PORT}"
 		node_configtoml_grpc_privileged_laddr="${DEFAULT_GRPC_PRIVILEGED_LADDR_PORT}"
-
 		current_node_ethrpc_port=${node_ethrpc_port}
 		current_node_ethp2p_port=${node_ethp2p_port}
 		current_node_ethproxy_port=${node_ethproxy_port}
@@ -2460,7 +2559,7 @@ cmd_init() {
 			for i in $(seq 1 ${full_nodes}); do
 				if [[ $i -eq ${full_nodes} ]]; then
 					nodes_full_nodes="${nodes_full_nodes}{
-						\"role\": \"rpc_full\",
+						\"role\": \"rpc-full\",
 						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
 						\"network\": \"${network}\",
 						\"wallet_address\": \"${wallet_address}\",
@@ -2479,7 +2578,7 @@ cmd_init() {
 					}"
 				else
 					nodes_full_nodes="${nodes_full_nodes}{
-						\"role\": \"rpc_full\",
+						\"role\": \"rpc-full\",
 						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
 						\"network\": \"${network}\",
 						\"wallet_address\": \"${wallet_address}\",
@@ -2528,6 +2627,7 @@ cmd_init() {
 						\"ethp2p_port\": ${current_node_ethp2p_port},
 						\"ethproxy_port\": ${current_node_ethproxy_port},
 						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+						\"el_ws_port\": ${current_node_el_ws_port},
 						\"el_authrpc_port\": ${current_node_el_authrpc_port},
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
@@ -2546,6 +2646,7 @@ cmd_init() {
 						\"ethp2p_port\": ${current_node_ethp2p_port},
 						\"ethproxy_port\": ${current_node_ethproxy_port},
 						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
+						\"el_ws_port\": ${current_node_el_ws_port},
 						\"el_authrpc_port\": ${current_node_el_authrpc_port},
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},

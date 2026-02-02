@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 ################################################################################
 # common.sh - Beranode CLI Common Command Functions
 ################################################################################
@@ -7,9 +8,9 @@
 # commands (init, start, etc.). It serves as a central repository for command
 # utilities that are needed by more than one command module.
 #
-# VERSION CONTEXT - Beranode CLI v0.6.0:
+# VERSION CONTEXT - Beranode CLI v0.7.1:
 # ──────────────────────────────────────────────────────────────────────────────
-# In the current version (v0.6.0), this module is structured as a placeholder
+# In the current version (v0.7.1), this module is structured as a placeholder
 # for future common command functionality. As the CLI evolves and patterns
 # emerge across command modules (init.sh, start.sh, etc.), shared functions
 # will be extracted and centralized here to promote code reuse and maintainability.

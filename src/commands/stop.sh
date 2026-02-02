@@ -41,22 +41,15 @@ cmd_stop() {
 	while [[ $# -gt 0 ]]; do
 		case $1 in
 		--beranodes-dir)
-			if [[ -z "$2" ]] || [[ "$2" == --* ]]; then
-				log_warn "--beranodes-dir not provided or missing argument. Defaulting to: $beranodes_dir"
-				shift
-			else
-				beranodes_dir="$2"
-				shift 2
-			fi
+			beranodes_dir=$(parse_beranodes_dir "$2")
+			shift 2
 			;;
 		--help | -h)
 			show_stop_help
 			return 0
 			;;
 		*)
-			log_error "Unknown option: $1"
-			show_stop_help
-			return 1
+			check_unknown_option "$1" "show_stop_help" || return 1
 			;;
 		esac
 	done
