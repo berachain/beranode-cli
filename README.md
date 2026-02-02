@@ -1,4 +1,4 @@
-# Beranode CLI
+# 🐻🛰️ Beranode CLI
 
 A command-line tool for managing Berachain nodes.
 

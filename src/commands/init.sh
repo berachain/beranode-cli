@@ -2301,8 +2301,11 @@ cmd_init() {
 	# [6] BINARY VERIFICATION
 	# =========================================================================
 	# Verify beacond and bera-reth binaries exist and are executable
+  if { [[ "$mode" == "local" ]] || [[ "$mode" == "docker" ]]; } && [[ "$IS_MACOS" == "true" ]]; then
+    if [[ "$mode" == "docker" ]]; then
+      log_warn "${YELLOW}Normal docker mode on MacOS is not supported. Continuing with build from source approach.${RESET}"
+    fi
 
-  if [[ "$mode" == "local" ]]; then
     missing_binaries=0
     # - beacond
     is_beacond_installed=false
@@ -2352,7 +2355,7 @@ cmd_init() {
         --binary-to-download "${BIN_BERARETH}" \
         --version-tag "latest"
     fi
-
+  # Mode meant for linux only
   elif [[ "$mode" == "docker" ]]; then
     # Check for existing bera-reth docker image
     bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
