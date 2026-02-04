@@ -201,6 +201,32 @@ cmd_start() {
 	done
 	log_success "All ports are available"
 
+	# Docker tags
+	docker_berareth_tag=""
+	docker_beacond_tag=""
+	if [[ "${mode}" == "docker" ]]; then
+		# Get tags
+		docker_berareth_tag=$(curl -sI https://github.com/berachain/bera-reth/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+		docker_beacond_tag=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+
+		# Check for existing docker image
+		docker_berareth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-bera-reth:${docker_berareth_tag}" || true)
+		if [[ -n "$docker_berareth_image" ]]; then
+			log_success "Found existing docker-bera-reth image: docker-bera-reth:${docker_berareth_tag}"
+		else
+			log_error "docker-bera-reth:${docker_berareth_tag} image not found"
+			return 1
+		fi
+
+		docker_beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-beacond:${docker_beacond_tag}" || true)
+		if [[ -n "$docker_beacond_image" ]]; then
+			log_success "Found existing docker-beacond image: docker-beacond:${docker_beacond_tag}"
+		else
+			log_error "docker-beacond:${docker_beacond_tag} image not found"
+			return 1
+		fi
+	fi
+
 	# -------------------------------------------------------------------------
 	# [STEP 5] Network-Specific Initialization
 	# -------------------------------------------------------------------------
@@ -220,8 +246,24 @@ cmd_start() {
 		# - Suitable for rapid iteration and testing
 		# ---------------------------------------------------------------------
 
-		if [[ "${mode}" == "local" ]]; then
-			log_info "Starting Beranode in local mode"
+		if [[ "${mode}" == "local" ]] || [[ "${mode}" == "docker" ]]; then
+			log_info "Starting Beranode in ${mode} mode"
+
+			if [[ "${mode}" == "local" ]]; then
+				# Check if bin/beacond exists in ${config_dir}/bin and is executable
+				local beacond_binary="${beranodes_dir}/bin/beacond"
+				if [[ ! -x "${beacond_binary}" ]]; then
+					log_error "beacond binary not found or not executable at: ${beacond_binary}"
+					return 1
+				fi
+
+				# Check if bin/bera-reth exists in ${config_dir}/bin and is executable
+				local bera_reth_binary="${beranodes_dir}/bin/bera-reth"
+				if [[ ! -x "${bera_reth_binary}" ]]; then
+					log_error "bera-reth binary not found or not executable at: ${bera_reth_binary}"
+					return 1
+				fi
+			fi
 
 			# Check if logs directory has existing files and prompt user
 			local logs_dir="${beranode_dir}${BERANODES_PATH_LOGS}"
@@ -486,7 +528,11 @@ cmd_start() {
 				log_success "✔ Directories made"
 
 				# Init beacond node
-				${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+				if [[ "$mode" == "docker" ]]; then
+					docker run -it --rm -v ${beacond_dir}:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+				else
+					${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+				fi
 				log_success "✔ Beacond node initialized"
 
 				# - replace priv_validator_key.json
@@ -522,6 +568,9 @@ EOF
 
 				# - add jwt.hex
 				echo -n "${jwt}" >"${node_dir}/beacond/config/jwt.hex"
+				if [[ "${mode}" == "docker" ]]; then
+					echo -n "${jwt}" >"${node_dir}/bera-reth/jwt.hex"
+				fi
 				log_success "✔ jwt.hex added"
 
 				# - update client.toml
@@ -602,8 +651,12 @@ EOF
 				sed "${SED_OPT[@]}" "s|^rpc-startup-check-interval = \".*\"|rpc-startup-check-interval = \"${apptoml_beacon_kit_engine_rpc_startup_check_interval}\"|" "${node_dir}/beacond/config/app.toml"
 				# rpc-jwt-refresh-interval
 				sed "${SED_OPT[@]}" "s|^rpc-jwt-refresh-interval = \".*\"|rpc-jwt-refresh-interval = \"${apptoml_beacon_kit_engine_rpc_jwt_refresh_interval}\"|" "${node_dir}/beacond/config/app.toml"
-				# jwt-secret-path
-				sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"${node_dir}/beacond/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				# jwt-secret
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"/tmp/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"${node_dir}/beacond/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				fi
 				# [beacon-kit-logger]
 				# time-format
 				sed "${SED_OPT[@]}" "s|^time-format = \".*\"|time-format = \"${apptoml_beacon_kit_logger_time_format}\"|" "${node_dir}/beacond/config/app.toml"
@@ -613,7 +666,12 @@ EOF
 				sed "${SED_OPT[@]}" "s|^log-style = \".*\"|log-style = \"${apptoml_beacon_kit_logger_style}\"|" "${node_dir}/beacond/config/app.toml"
 				# [beacon-kit-kzg]
 				# trusted-setup-path
-				sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"${beranodes_dir}/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					cp ${beranodes_dir}/tmp/kzg-trusted-setup.json ${node_dir}/beacond/kzg-trusted-setup.json
+					sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"${beranodes_dir}/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				fi
 				# kzg-implementation
 				sed "${SED_OPT[@]}" "s|^implementation = \".*\"|implementation = \"${apptoml_beacon_kit_kzg_implementation}\"|" "${node_dir}/beacond/config/app.toml"
 				# [beacon-kit-payload-builder]
@@ -657,15 +715,31 @@ EOF
 				# log_format
 				sed "${SED_OPT[@]}" "s|^log_format = \".*\"|log_format = \"${configtoml_log_format}\"|" "${node_dir}/beacond/config/config.toml"
 				# genesis_file
-				sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"${node_dir}/beacond/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"/tmp/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"${node_dir}/beacond/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_key_file
-				sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"${node_dir}/beacond/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"/tmp/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"${node_dir}/beacond/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_state_file
-				sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"${node_dir}/beacond/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"/tmp/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"${node_dir}/beacond/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_laddr
 				sed "${SED_OPT[@]}" "s|^priv_validator_laddr = \".*\"|priv_validator_laddr = \"${configtoml_priv_validator_laddr}\"|" "${node_dir}/beacond/config/config.toml"
 				# node_key_file
-				sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"${node_dir}/beacond/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"/tmp/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"${node_dir}/beacond/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# abci
 				sed "${SED_OPT[@]}" "s|^abci = \".*\"|abci = \"${configtoml_abci}\"|" "${node_dir}/beacond/config/config.toml"
 				# filter_peers
@@ -717,8 +791,10 @@ EOF
 				# max_header_bytes
 				sed "${SED_OPT[@]}" "s|^max_header_bytes = .*|max_header_bytes = \"${configtoml_rpc_max_header_bytes}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_cert_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^tls_cert_file = \".*\"|tls_cert_file = \"${configtoml_rpc_tls_cert_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_key_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^tls_key_file = \".*\"|tls_key_file = \"${configtoml_rpc_tls_key_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# pprof_laddr
 				sed "${SED_OPT[@]}" "s|^pprof_laddr = \".*\"|pprof_laddr = \"${configtoml_rpc_pprof_laddr}\"|" "${node_dir}/beacond/config/config.toml"
@@ -745,38 +821,43 @@ EOF
 				sed "${SED_OPT[@]}" "256s|^laddr = \".*\"|laddr = \"tcp://0.0.0.0:${ethp2p_port}\"|" "${node_dir}/beacond/config/config.toml"
 				# external_address
 				sed "${SED_OPT[@]}" "s|^external_address = \".*\"|external_address = \"${configtoml_p2p_external_address}\"|" "${node_dir}/beacond/config/config.toml"
-
 				# Adjust seeds and peers to exclude the current node for connections
-				read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[$node_index]}")
-				read -a node_p2p_ports < <(array_exclude_element p2p_ports[@] "${p2p_ports[$node_index]}")
-				configtoml_p2p_seeds="$(
-					out=()
-					for i in "${!node_seeds[@]}"; do
-						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
+				if [[ ${#seeds[@]} -gt 1 ]]; then
+					read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[$node_index]}")
+					read -a node_p2p_ports < <(array_exclude_element p2p_ports[@] "${p2p_ports[$node_index]}")
+					configtoml_p2p_seeds="$(
+						out=()
+						for i in "${!node_seeds[@]}"; do
+							out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					read -a node_peers < <(array_exclude_element peers[@] "${peers[$node_index]}")
+					configtoml_p2p_persistent_peers="$(
+						out=()
+						for i in "${!node_seeds[@]}"; do
+							out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					# seeds
+					sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
+					# persistent_peers
+					sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 
-				read -a node_peers < <(array_exclude_element peers[@] "${peers[$node_index]}")
-				configtoml_p2p_persistent_peers="$(
-					out=()
-					for i in "${!node_seeds[@]}"; do
-						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
-				# seeds
-				sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
-				# persistent_peers
-				sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				# addr_book_file
-				sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"/tmp/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# addr_book_strict
 				sed "${SED_OPT[@]}" "s|^addr_book_strict = .*|addr_book_strict = \"${configtoml_p2p_addr_book_strict}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_num_inbound_peers
@@ -852,6 +933,7 @@ EOF
 				sed "${SED_OPT[@]}" "442s|^version = .*|version = \"${configtoml_blocksync_version}\"|" "${node_dir}/beacond/config/config.toml"
 				# [consensus]
 				# wal_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^wal_file = \".*\"|wal_file = \"${configtoml_consensus_wal_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# timeout_propose
 				sed "${SED_OPT[@]}" "s|^timeout_propose = \".*\"|timeout_propose = \"${configtoml_consensus_timeout_propose}\"|" "${node_dir}/beacond/config/config.toml"
@@ -918,9 +1000,13 @@ EOF
 
 				# Init bera-reth node
 				cp "${beranodes_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" "${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}"
-				${bin_bera_reth} init \
-					--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
-					--datadir="${bera_reth_dir}" >/dev/null 2>&1
+				if [[ "${mode}" == "docker" ]]; then
+					docker run -it --rm -v ${bera_reth_dir}:/tmp docker-bera-reth:${docker_berareth_tag} bera-reth init --chain=/tmp/${GENESIS_ETH_NAME_DEFAULT} --datadir=/tmp >/dev/null 2>&1
+				else
+					${bin_bera_reth} init \
+						--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
+						--datadir="${bera_reth_dir}" >/dev/null 2>&1
+				fi
 				# remove existing discovery-secret
 				if [ -f "${bera_reth_dir}/discovery-secret" ]; then
 					rm -f "${bera_reth_dir}/discovery-secret"
@@ -930,7 +1016,7 @@ EOF
 
 			# Start the nodes and record their pids
 			print_header "Starting nodes"
-      local nodes=$(jq -r '.nodes' "${config_json_path}")
+			local nodes=$(jq -r '.nodes' "${config_json_path}")
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
 				echo "--------------------------------"
 				echo "Starting node $node_index"
@@ -939,7 +1025,7 @@ EOF
 				# beacond
 				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
 				local moniker=$(echo "${node_json}" | jq -r '.moniker')
-        local role=$(echo "${node_json}" | jq -r '.role')
+				local role=$(echo "${node_json}" | jq -r '.role')
 				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${node_index}-${role}"
 				local beacond_dir="${node_dir}/beacond"
 				local bera_reth_dir="${node_dir}/bera-reth"
@@ -950,8 +1036,14 @@ EOF
 				if [[ "${role}" == "validator" ]]; then
 					role_short="val"
 				fi
-				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
-				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+				if [[ "${mode}" == "docker" ]]; then
+					# TODO: refactor docker compose
+					docker run -it -d -v ${beacond_dir}:/tmp --name ${node_index}-${role_short}-${base_moniker}-beacond docker-beacond:${docker_beacond_tag} beacond start --home /tmp >/dev/null 2>&1
+					#  &>/logs/${node_index}-${role_short}-${base_moniker}-beacond.log &
+				else
+					${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
+					echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+				fi
 				log_success "✔ Beacond node started"
 
 				# bera-reth
@@ -965,67 +1057,97 @@ EOF
 				local configtoml_grpc_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_laddr')
 				local configtoml_grpc_privileged_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_privileged_laddr')
 
-				read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
-				read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
-				read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
+				configtoml_berareth_bootnodes=""
+				configtoml_berareth_trusted_peers=""
+				if [[ ${#berareth_bootnodes[@]} -gt 1 ]]; then
+					read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
+					read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
+					read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
 
-				configtoml_berareth_bootnodes="$(
-					out=()
-					for i in "${!bootnodes[@]}"; do
-						out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
-				configtoml_berareth_trusted_peers="$(
-					out=()
-					for i in "${!trusted_peers[@]}"; do
-						out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
+					configtoml_berareth_bootnodes="$(
+						out=()
+						for i in "${!bootnodes[@]}"; do
+							out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					configtoml_berareth_trusted_peers="$(
+						out=()
+						for i in "${!trusted_peers[@]}"; do
+							out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+				fi
 
 				private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
 				public_key=$(echo "${node_json}" | jq -r '.berareth_config.public_key')
 
 				# Add discovery secret - enode bera-reth id
-				echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret"
-				${bin_bera_reth} node \
-					$( [[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}" ) \
-					$( [[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}" ) \
-					--authrpc.addr="127.0.0.1" \
-					--authrpc.port="${el_authrpc_port}" \
-					--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
-					--chain="${bera_reth_dir}/eth-genesis.json" \
-					--datadir="${bera_reth_dir}" \
-					--discovery.port="${el_eth_port}" \
-					--engine.persistence-threshold=0 \
-					--engine.memory-block-buffer-target=0 \
-					--http \
-					--nat="extip:127.0.0.1" \
-					--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
-					--http.addr=0.0.0.0 \
-					--http.port="${el_ethrpc_port}" \
-					--http.corsdomain="*" \
-					--port="${el_eth_port}" \
-					--ws \
-					--ws.addr=0.0.0.0 \
-					--ws.port="${el_ws_port}" \
-					--ws.origins="*" \
-					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
-				local pid=$!
-				echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+				echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret" 2>/dev/null
+				if [[ "${mode}" == "docker" ]]; then
+					# TODO: refactor docker compose
+					docker run -it -d -v ${bera_reth_dir}:/tmp --name ${node_index}-${role_short}-${base_moniker}-bera-reth docker-bera-reth:${docker_berareth_tag} bera-reth node \
+						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
+						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
+						--authrpc.addr="127.0.0.1" \
+						--authrpc.port="${el_authrpc_port}" \
+						--authrpc.jwtsecret="/tmp/jwt.hex" \
+						--chain="/tmp/eth-genesis.json" \
+						--datadir="/tmp" \
+						--discovery.port="${el_eth_port}" \
+						--engine.persistence-threshold=0 \
+						--engine.memory-block-buffer-target=0 \
+						--http --nat="extip:127.0.0.1" \
+						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
+						--http.addr=0.0.0.0 \
+						--http.port="${el_ethrpc_port}" \
+						--http.corsdomain="*" \
+						--port="${el_eth_port}" \
+						--ws \
+						--ws.addr=0.0.0.0 \
+						--ws.port="${el_ws_port}" \
+						--ws.origins="*"
+					# &>/logs/${node_index}-${role_short}-${base_moniker}-berareth.log &
+				else
+					${bin_bera_reth} node \
+						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
+						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
+						--authrpc.addr="127.0.0.1" \
+						--authrpc.port="${el_authrpc_port}" \
+						--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
+						--chain="${bera_reth_dir}/eth-genesis.json" \
+						--datadir="${bera_reth_dir}" \
+						--discovery.port="${el_eth_port}" \
+						--engine.persistence-threshold=0 \
+						--engine.memory-block-buffer-target=0 \
+						--http \
+						--nat="extip:127.0.0.1" \
+						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
+						--http.addr=0.0.0.0 \
+						--http.port="${el_ethrpc_port}" \
+						--http.corsdomain="*" \
+						--port="${el_eth_port}" \
+						--ws \
+						--ws.addr=0.0.0.0 \
+						--ws.port="${el_ws_port}" \
+						--ws.origins="*" \
+						&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
+					local pid=$!
+					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+				fi
 				log_success "✔ Bera-reth node started"
 			done
-    elif [[ "$mode" == "docker" ]]; then
-      log_info "Starting Beranode in docker mode"
-      log_warn "Docker mode is not yet supported. Docker integration is coming soon."
-      return 1
+		elif [[ "$mode" == "docker" ]]; then
+			log_info "Starting Beranode in docker mode"
+			log_warn "Docker mode is not yet supported. Docker integration is coming soon."
+			return 1
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")
 			log_error "Unsupported mode: ${mode}"

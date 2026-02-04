@@ -73,7 +73,7 @@ set -euo pipefail
 # WARNING: Do not manually edit this value - use bump-version.sh script
 #
 # Example: "0.6.0"
-BERANODE_VERSION="0.7.1"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.7.1" # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # [2] PLATFORM DETECTION

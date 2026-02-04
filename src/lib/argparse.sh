@@ -31,17 +31,17 @@ set -euo pipefail
 #   fi
 ################################################################################
 parse_kv_arg() {
-    local option_name="$1"
-    local next_arg="${2:-}"
+	local option_name="$1"
+	local next_arg="${2:-}"
 
-    # Check if next argument exists and doesn't look like another option
-    if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
-        log_warn "${option_name} not provided or missing argument"
-        return 1
-    fi
+	# Check if next argument exists and doesn't look like another option
+	if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
+		log_warn "${option_name} not provided or missing argument"
+		return 1
+	fi
 
-    echo "$next_arg"
-    return 0
+	echo "$next_arg"
+	return 0
 }
 
 ################################################################################
@@ -58,14 +58,14 @@ parse_kv_arg() {
 #   beranodes_dir=$(parse_beranodes_dir "$2")
 ################################################################################
 parse_beranodes_dir() {
-    local next_arg="${1:-}"
+	local next_arg="${1:-}"
 
-    if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
-        log_warn "--beranodes-dir not provided. Defaulting to: ${BERANODES_PATH_DEFAULT}"
-        echo "${BERANODES_PATH_DEFAULT}"
-    else
-        echo "$next_arg"
-    fi
+	if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
+		log_warn "--beranodes-dir not provided. Defaulting to: ${BERANODES_PATH_DEFAULT}"
+		echo "${BERANODES_PATH_DEFAULT}"
+	else
+		echo "$next_arg"
+	fi
 }
 
 ################################################################################
@@ -83,17 +83,17 @@ parse_beranodes_dir() {
 #   check_unknown_option "$1" "show_start_help"
 ################################################################################
 check_unknown_option() {
-    local unknown_option="$1"
-    local help_function="$2"
+	local unknown_option="$1"
+	local help_function="$2"
 
-    log_error "Unknown option: $unknown_option"
+	log_error "Unknown option: $unknown_option"
 
-    # Call the help function if it exists
-    if declare -f "$help_function" >/dev/null; then
-        "$help_function"
-    fi
+	# Call the help function if it exists
+	if declare -f "$help_function" >/dev/null; then
+		"$help_function"
+	fi
 
-    return 1
+	return 1
 }
 
 ################################################################################
@@ -112,14 +112,14 @@ check_unknown_option() {
 #   validate_required_arg "$network" "network" || return 1
 ################################################################################
 validate_required_arg() {
-    local value="$1"
-    local arg_name="$2"
+	local value="$1"
+	local arg_name="$2"
 
-    if [[ -z "$value" ]]; then
-        log_error "Required argument missing: $arg_name"
-        return 1
-    fi
-    return 0
+	if [[ -z "$value" ]]; then
+		log_error "Required argument missing: $arg_name"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -141,8 +141,8 @@ validate_required_arg() {
 #   esac
 ################################################################################
 parse_boolean_flag() {
-    echo "true"
-    return 0
+	echo "true"
+	return 0
 }
 
 ################################################################################
@@ -164,16 +164,16 @@ parse_boolean_flag() {
 #   fi
 ################################################################################
 parse_integer_arg() {
-    local option_name="$1"
-    local value="${2:-}"
+	local option_name="$1"
+	local value="${2:-}"
 
-    if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9]+$ ]]; then
-        log_error "${option_name} requires a valid integer value"
-        return 1
-    fi
+	if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9]+$ ]]; then
+		log_error "${option_name} requires a valid integer value"
+		return 1
+	fi
 
-    echo "$value"
-    return 0
+	echo "$value"
+	return 0
 }
 
 ################################################################################
@@ -191,11 +191,11 @@ parse_integer_arg() {
 #   shift $(shift_args false) # Shifts 1 position
 ################################################################################
 shift_args() {
-    local has_value="${1:-false}"
+	local has_value="${1:-false}"
 
-    if [[ "$has_value" == "true" ]]; then
-        echo 2
-    else
-        echo 1
-    fi
+	if [[ "$has_value" == "true" ]]; then
+		echo 2
+	else
+		echo 1
+	fi
 }

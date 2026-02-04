@@ -1,0 +1,46 @@
+# Image source - Alpine chosen for minimal size and fast build times
+FROM alpine:3.23.3
+
+# Build argument for the tag (defaults to "latest" which will fetch the latest release)
+ARG BEACON_KIT_TAG=latest
+
+# Check if the architecture is supported
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" != "aarch64" ]; then \
+        echo "This image only supports aarch64 "; \
+        exit 1; \
+    fi
+
+# Install dependencies
+RUN apk update && \
+    apk add --no-cache \
+        bash \
+        ncurses \
+        go \
+        curl \
+        wget \
+        git \
+        build-base
+
+# Build beacond - This step will take a little while and your computer fan may start to spin up.
+RUN cd /tmp && git clone https://github.com/berachain/beacon-kit.git && \
+    cd beacon-kit && \
+    git fetch --tags && \
+    if [ "$BEACON_KIT_TAG" = "latest" ]; then \
+        TAG=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n'); \
+    else \
+        TAG="$BEACON_KIT_TAG"; \
+    fi && \
+    git checkout $TAG && \
+    make build && \
+    cp /tmp/beacon-kit/build/bin/beacond /usr/local/bin/beacond && \
+    chmod +x /usr/local/bin/beacond
+
+# Clean up - Remove the build dependencies
+RUN apk del git make bash ncurses go build-base; rm -rf /tmp/*;
+
+# Confirm beacond working
+RUN beacond version
+
+# Ensure the container keeps running if no command is provided
+CMD ["tail", "-f", "/dev/null"]

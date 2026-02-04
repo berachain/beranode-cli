@@ -1,0 +1,49 @@
+version: '3.8'
+
+# [Example Output]:
+# services:
+#   0-validator-beacond:
+#     image: docker-beacond:${docker_beacond_tag}
+#     ports:
+#       - "26657:26657"
+#       - "26656:26656"
+#       - "26658:26658"
+#       - "26660:26660"
+#     environment:
+#       - BEACON_KIT_TAG=${docker_beacond_tag}
+#     volumes:
+#       - beacond-data:/root/.beacond
+#   0-validator-bera-reth:
+#     image: docker-bera-reth:${docker_berareth_tag}
+#     ports:
+#       - "8545:8545"
+#       - "8551:8551"
+#       - "30303:30303"
+#       - "9101:9101"
+#       - "9102:9102"
+#     environment:
+#       - BERA_RETH_TAG=${docker_berareth_tag}  
+#   1-rpc-full-beacond:
+#     image: docker-beacond:${docker_beacond_tag}
+#     ports:
+#       - "27657:26657"
+#       - "26656:26656"
+#       - "26658:26658"
+#       - "26660:26660"
+#     environment:
+#       - BEACON_KIT_TAG=${docker_beacond_tag}
+#     volumes:
+#       - beacond-data:/root/.beacond
+#   1-rpc-full-bera-reth:
+#     image: docker-bera-reth:${docker_berareth_tag}
+#     ports:
+#       - "8545:8545"
+#       - "8551:8551"
+#       - "30303:30303"
+#       - "9101:9101"
+#       - "9102:9102"
+#     environment:
+#       - BERA_RETH_TAG=${docker_berareth_tag}  
+# networks:
+#   beranet:
+#     driver: bridge

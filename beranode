@@ -13,7 +13,6 @@ set -euo pipefail
 # Generated: [BUILD_TIMESTAMP]
 #
 
-
 # =============================================================================
 # constants
 # Source: lib/constants.sh
@@ -93,7 +92,7 @@ set -euo pipefail
 # WARNING: Do not manually edit this value - use bump-version.sh script
 #
 # Example: "0.6.0"
-BERANODE_VERSION="0.7.1"  # Managed by scripts/bump-version.sh - do not edit manually
+BERANODE_VERSION="0.7.1" # Managed by scripts/bump-version.sh - do not edit manually
 
 # =============================================================================
 # [2] PLATFORM DETECTION
@@ -760,7 +759,6 @@ readonly CONFIGTOML_INSTRUMENTATION_PROMETHEUS_LISTEN_ADDR=":26660"
 readonly CONFIGTOML_INSTRUMENTATION_MAX_OPEN_CONNECTIONS=800
 readonly CONFIGTOML_INSTRUMENTATION_NAMESPACE="cometbft"
 
-
 # =============================================================================
 # logging
 # Source: lib/logging.sh
@@ -1006,7 +1004,6 @@ log_error() {
 # END OF LOGGING MODULE
 # =============================================================================
 
-
 # =============================================================================
 # errors
 # Source: lib/errors.sh
@@ -1041,23 +1038,23 @@ set -euo pipefail
 #   echo "Downloaded: $output"
 ################################################################################
 run_or_fail() {
-    local cmd="$1"
-    local error_msg="${2:-Command failed}"
-    local output
-    local exit_code=0
+	local cmd="$1"
+	local error_msg="${2:-Command failed}"
+	local output
+	local exit_code=0
 
-    # Execute command and capture both stdout and stderr
-    if ! output=$(eval "$cmd" 2>&1); then
-        exit_code=$?
-        log_error "$error_msg"
-        log_error "Command: $cmd"
-        log_error "Output: $output"
-        log_error "Exit code: $exit_code"
-        return 1
-    fi
+	# Execute command and capture both stdout and stderr
+	if ! output=$(eval "$cmd" 2>&1); then
+		exit_code=$?
+		log_error "$error_msg"
+		log_error "Command: $cmd"
+		log_error "Output: $output"
+		log_error "Exit code: $exit_code"
+		return 1
+	fi
 
-    echo "$output"
-    return 0
+	echo "$output"
+	return 0
 }
 
 ################################################################################
@@ -1076,15 +1073,15 @@ run_or_fail() {
 #   assert_success "[ -f /path/to/file ]" "Required file not found"
 ################################################################################
 assert_success() {
-    local cmd="$1"
-    local error_msg="${2:-Assertion failed}"
+	local cmd="$1"
+	local error_msg="${2:-Assertion failed}"
 
-    if ! eval "$cmd" >/dev/null 2>&1; then
-        log_error "$error_msg"
-        log_error "Command: $cmd"
-        return 1
-    fi
-    return 0
+	if ! eval "$cmd" >/dev/null 2>&1; then
+		log_error "$error_msg"
+		log_error "Command: $cmd"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -1103,14 +1100,14 @@ assert_success() {
 #   assert_file_exists "/etc/config.json" "Config file not found"
 ################################################################################
 assert_file_exists() {
-    local file_path="$1"
-    local error_msg="${2:-File not found: $file_path}"
+	local file_path="$1"
+	local error_msg="${2:-File not found: $file_path}"
 
-    if [[ ! -f "$file_path" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ ! -f "$file_path" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -1129,14 +1126,14 @@ assert_file_exists() {
 #   assert_dir_exists "/var/lib/beranode" "Node directory not found"
 ################################################################################
 assert_dir_exists() {
-    local dir_path="$1"
-    local error_msg="${2:-Directory not found: $dir_path}"
+	local dir_path="$1"
+	local error_msg="${2:-Directory not found: $dir_path}"
 
-    if [[ ! -d "$dir_path" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ ! -d "$dir_path" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -1156,15 +1153,15 @@ assert_dir_exists() {
 #   assert_not_empty "$api_key" "API_KEY" "API key is required"
 ################################################################################
 assert_not_empty() {
-    local value="$1"
-    local var_name="$2"
-    local error_msg="${3:-Variable is empty: $var_name}"
+	local value="$1"
+	local var_name="$2"
+	local error_msg="${3:-Variable is empty: $var_name}"
 
-    if [[ -z "$value" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ -z "$value" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -1184,29 +1181,29 @@ assert_not_empty() {
 #   run_with_retry "curl -sL https://api.example.com" 5 10
 ################################################################################
 run_with_retry() {
-    local cmd="$1"
-    local max_retries="${2:-3}"
-    local retry_delay="${3:-5}"
-    local attempt=1
-    local exit_code=0
+	local cmd="$1"
+	local max_retries="${2:-3}"
+	local retry_delay="${3:-5}"
+	local attempt=1
+	local exit_code=0
 
-    while (( attempt <= max_retries )); do
-        if eval "$cmd" >/dev/null 2>&1; then
-            return 0
-        fi
-        exit_code=$?
+	while ((attempt <= max_retries)); do
+		if eval "$cmd" >/dev/null 2>&1; then
+			return 0
+		fi
+		exit_code=$?
 
-        if (( attempt < max_retries )); then
-            log_warn "Command failed (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
-            sleep "$retry_delay"
-        fi
+		if ((attempt < max_retries)); then
+			log_warn "Command failed (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+			sleep "$retry_delay"
+		fi
 
-        ((attempt++))
-    done
+		((attempt++))
+	done
 
-    log_error "Command failed after $max_retries attempts"
-    log_error "Command: $cmd"
-    return $exit_code
+	log_error "Command failed after $max_retries attempts"
+	log_error "Command: $cmd"
+	return $exit_code
 }
 
 ################################################################################
@@ -1225,16 +1222,15 @@ run_with_retry() {
 #   exit_on_error $? "Critical failure: unable to proceed"
 ################################################################################
 exit_on_error() {
-    local exit_code="$1"
-    local error_msg="$2"
+	local exit_code="$1"
+	local error_msg="$2"
 
-    if [[ "$exit_code" -ne 0 ]]; then
-        log_error "$error_msg"
-        log_error "Exiting with code: $exit_code"
-        exit "$exit_code"
-    fi
+	if [[ "$exit_code" -ne 0 ]]; then
+		log_error "$error_msg"
+		log_error "Exiting with code: $exit_code"
+		exit "$exit_code"
+	fi
 }
-
 
 # =============================================================================
 # json
@@ -1270,24 +1266,24 @@ set -euo pipefail
 #   echo "Network: $value"
 ################################################################################
 jq_get() {
-    local file="$1"
-    local path="$2"
-    local default="${3:-}"
-    local value
+	local file="$1"
+	local path="$2"
+	local default="${3:-}"
+	local value
 
-    # Execute jq and capture value, treating errors as "null"
-    if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
-        value="null"
-    fi
+	# Execute jq and capture value, treating errors as "null"
+	if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
+		value="null"
+	fi
 
-    # Return default if value is null or empty
-    if [[ "$value" == "null" ]] || [[ -z "$value" ]]; then
-        echo "$default"
-    else
-        echo "$value"
-    fi
+	# Return default if value is null or empty
+	if [[ "$value" == "null" ]] || [[ -z "$value" ]]; then
+		echo "$default"
+	else
+		echo "$value"
+	fi
 
-    return 0
+	return 0
 }
 
 ################################################################################
@@ -1306,30 +1302,30 @@ jq_get() {
 #   chain_id=$(jq_get_required "config.json" ".chain_id") || return 1
 ################################################################################
 jq_get_required() {
-    local file="$1"
-    local path="$2"
-    local value
+	local file="$1"
+	local path="$2"
+	local value
 
-    # Check if file exists
-    if [[ ! -f "$file" ]]; then
-        log_error "JSON file not found: $file"
-        return 1
-    fi
+	# Check if file exists
+	if [[ ! -f "$file" ]]; then
+		log_error "JSON file not found: $file"
+		return 1
+	fi
 
-    # Execute jq and capture value
-    if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
-        log_error "Failed to parse JSON field: $path in $file"
-        return 1
-    fi
+	# Execute jq and capture value
+	if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
+		log_error "Failed to parse JSON field: $path in $file"
+		return 1
+	fi
 
-    # Fail if value is null or empty
-    if [[ "$value" == "null" ]] || [[ -z "$value" ]]; then
-        log_error "Missing required field: $path in $file"
-        return 1
-    fi
+	# Fail if value is null or empty
+	if [[ "$value" == "null" ]] || [[ -z "$value" ]]; then
+		log_error "Missing required field: $path in $file"
+		return 1
+	fi
 
-    echo "$value"
-    return 0
+	echo "$value"
+	return 0
 }
 
 ################################################################################
@@ -1350,23 +1346,23 @@ jq_get_required() {
 #   fi
 ################################################################################
 jq_has_field() {
-    local file="$1"
-    local path="$2"
-    local value
+	local file="$1"
+	local path="$2"
+	local value
 
-    if [[ ! -f "$file" ]]; then
-        return 1
-    fi
+	if [[ ! -f "$file" ]]; then
+		return 1
+	fi
 
-    if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
-        return 1
-    fi
+	if ! value=$(jq -r "$path" "$file" 2>/dev/null); then
+		return 1
+	fi
 
-    if [[ "$value" == "null" ]]; then
-        return 1
-    fi
+	if [[ "$value" == "null" ]]; then
+		return 1
+	fi
 
-    return 0
+	return 0
 }
 
 ################################################################################
@@ -1386,19 +1382,19 @@ jq_has_field() {
 #   fi
 ################################################################################
 jq_validate_json() {
-    local file="$1"
+	local file="$1"
 
-    if [[ ! -f "$file" ]]; then
-        log_error "JSON file not found: $file"
-        return 1
-    fi
+	if [[ ! -f "$file" ]]; then
+		log_error "JSON file not found: $file"
+		return 1
+	fi
 
-    if ! jq empty "$file" 2>/dev/null; then
-        log_error "Invalid JSON in file: $file"
-        return 1
-    fi
+	if ! jq empty "$file" 2>/dev/null; then
+		log_error "Invalid JSON in file: $file"
+		return 1
+	fi
 
-    return 0
+	return 0
 }
 
 ################################################################################
@@ -1418,22 +1414,22 @@ jq_validate_json() {
 #   echo "Found $count nodes"
 ################################################################################
 jq_get_array_length() {
-    local file="$1"
-    local path="$2"
-    local length
+	local file="$1"
+	local path="$2"
+	local length
 
-    if ! length=$(jq -r "${path} | length" "$file" 2>/dev/null); then
-        log_error "Failed to get array length: $path in $file"
-        return 1
-    fi
+	if ! length=$(jq -r "${path} | length" "$file" 2>/dev/null); then
+		log_error "Failed to get array length: $path in $file"
+		return 1
+	fi
 
-    if [[ "$length" == "null" ]]; then
-        log_error "Field is not an array: $path in $file"
-        return 1
-    fi
+	if [[ "$length" == "null" ]]; then
+		log_error "Field is not an array: $path in $file"
+		return 1
+	fi
 
-    echo "$length"
-    return 0
+	echo "$length"
+	return 0
 }
 
 ################################################################################
@@ -1454,23 +1450,23 @@ jq_get_array_length() {
 #   echo "First node: $first_node"
 ################################################################################
 jq_get_array_item() {
-    local file="$1"
-    local path="$2"
-    local index="$3"
-    local item
+	local file="$1"
+	local path="$2"
+	local index="$3"
+	local item
 
-    if ! item=$(jq -r "${path}[${index}]" "$file" 2>/dev/null); then
-        log_error "Failed to get array item: ${path}[${index}] in $file"
-        return 1
-    fi
+	if ! item=$(jq -r "${path}[${index}]" "$file" 2>/dev/null); then
+		log_error "Failed to get array item: ${path}[${index}] in $file"
+		return 1
+	fi
 
-    if [[ "$item" == "null" ]]; then
-        log_error "Array index out of bounds: ${path}[${index}] in $file"
-        return 1
-    fi
+	if [[ "$item" == "null" ]]; then
+		log_error "Array index out of bounds: ${path}[${index}] in $file"
+		return 1
+	fi
 
-    echo "$item"
-    return 0
+	echo "$item"
+	return 0
 }
 
 ################################################################################
@@ -1490,33 +1486,33 @@ jq_get_array_item() {
 #   jq_set_field "config.json" ".network" "mainnet"
 ################################################################################
 jq_set_field() {
-    local file="$1"
-    local path="$2"
-    local value="$3"
-    local temp_file
+	local file="$1"
+	local path="$2"
+	local value="$3"
+	local temp_file
 
-    if [[ ! -f "$file" ]]; then
-        log_error "JSON file not found: $file"
-        return 1
-    fi
+	if [[ ! -f "$file" ]]; then
+		log_error "JSON file not found: $file"
+		return 1
+	fi
 
-    temp_file=$(mktemp)
+	temp_file=$(mktemp)
 
-    # Update field and write to temp file
-    if ! jq "${path} = \"${value}\"" "$file" > "$temp_file" 2>/dev/null; then
-        log_error "Failed to set field: $path in $file"
-        rm -f "$temp_file"
-        return 1
-    fi
+	# Update field and write to temp file
+	if ! jq "${path} = \"${value}\"" "$file" >"$temp_file" 2>/dev/null; then
+		log_error "Failed to set field: $path in $file"
+		rm -f "$temp_file"
+		return 1
+	fi
 
-    # Replace original file with updated version
-    if ! mv "$temp_file" "$file"; then
-        log_error "Failed to update file: $file"
-        rm -f "$temp_file"
-        return 1
-    fi
+	# Replace original file with updated version
+	if ! mv "$temp_file" "$file"; then
+		log_error "Failed to update file: $file"
+		rm -f "$temp_file"
+		return 1
+	fi
 
-    return 0
+	return 0
 }
 
 ################################################################################
@@ -1534,21 +1530,20 @@ jq_set_field() {
 #   jq_pretty_print "config.json"
 ################################################################################
 jq_pretty_print() {
-    local file="$1"
+	local file="$1"
 
-    if [[ ! -f "$file" ]]; then
-        log_error "JSON file not found: $file"
-        return 1
-    fi
+	if [[ ! -f "$file" ]]; then
+		log_error "JSON file not found: $file"
+		return 1
+	fi
 
-    if ! jq '.' "$file" 2>/dev/null; then
-        log_error "Invalid JSON in file: $file"
-        return 1
-    fi
+	if ! jq '.' "$file" 2>/dev/null; then
+		log_error "Invalid JSON in file: $file"
+		return 1
+	fi
 
-    return 0
+	return 0
 }
-
 
 # =============================================================================
 # argparse
@@ -1587,17 +1582,17 @@ set -euo pipefail
 #   fi
 ################################################################################
 parse_kv_arg() {
-    local option_name="$1"
-    local next_arg="${2:-}"
+	local option_name="$1"
+	local next_arg="${2:-}"
 
-    # Check if next argument exists and doesn't look like another option
-    if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
-        log_warn "${option_name} not provided or missing argument"
-        return 1
-    fi
+	# Check if next argument exists and doesn't look like another option
+	if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
+		log_warn "${option_name} not provided or missing argument"
+		return 1
+	fi
 
-    echo "$next_arg"
-    return 0
+	echo "$next_arg"
+	return 0
 }
 
 ################################################################################
@@ -1614,14 +1609,14 @@ parse_kv_arg() {
 #   beranodes_dir=$(parse_beranodes_dir "$2")
 ################################################################################
 parse_beranodes_dir() {
-    local next_arg="${1:-}"
+	local next_arg="${1:-}"
 
-    if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
-        log_warn "--beranodes-dir not provided. Defaulting to: ${BERANODES_PATH_DEFAULT}"
-        echo "${BERANODES_PATH_DEFAULT}"
-    else
-        echo "$next_arg"
-    fi
+	if [[ -z "$next_arg" ]] || [[ "$next_arg" == --* ]]; then
+		log_warn "--beranodes-dir not provided. Defaulting to: ${BERANODES_PATH_DEFAULT}"
+		echo "${BERANODES_PATH_DEFAULT}"
+	else
+		echo "$next_arg"
+	fi
 }
 
 ################################################################################
@@ -1639,17 +1634,17 @@ parse_beranodes_dir() {
 #   check_unknown_option "$1" "show_start_help"
 ################################################################################
 check_unknown_option() {
-    local unknown_option="$1"
-    local help_function="$2"
+	local unknown_option="$1"
+	local help_function="$2"
 
-    log_error "Unknown option: $unknown_option"
+	log_error "Unknown option: $unknown_option"
 
-    # Call the help function if it exists
-    if declare -f "$help_function" >/dev/null; then
-        "$help_function"
-    fi
+	# Call the help function if it exists
+	if declare -f "$help_function" >/dev/null; then
+		"$help_function"
+	fi
 
-    return 1
+	return 1
 }
 
 ################################################################################
@@ -1668,14 +1663,14 @@ check_unknown_option() {
 #   validate_required_arg "$network" "network" || return 1
 ################################################################################
 validate_required_arg() {
-    local value="$1"
-    local arg_name="$2"
+	local value="$1"
+	local arg_name="$2"
 
-    if [[ -z "$value" ]]; then
-        log_error "Required argument missing: $arg_name"
-        return 1
-    fi
-    return 0
+	if [[ -z "$value" ]]; then
+		log_error "Required argument missing: $arg_name"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -1697,8 +1692,8 @@ validate_required_arg() {
 #   esac
 ################################################################################
 parse_boolean_flag() {
-    echo "true"
-    return 0
+	echo "true"
+	return 0
 }
 
 ################################################################################
@@ -1720,16 +1715,16 @@ parse_boolean_flag() {
 #   fi
 ################################################################################
 parse_integer_arg() {
-    local option_name="$1"
-    local value="${2:-}"
+	local option_name="$1"
+	local value="${2:-}"
 
-    if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9]+$ ]]; then
-        log_error "${option_name} requires a valid integer value"
-        return 1
-    fi
+	if [[ -z "$value" ]] || ! [[ "$value" =~ ^[0-9]+$ ]]; then
+		log_error "${option_name} requires a valid integer value"
+		return 1
+	fi
 
-    echo "$value"
-    return 0
+	echo "$value"
+	return 0
 }
 
 ################################################################################
@@ -1747,15 +1742,14 @@ parse_integer_arg() {
 #   shift $(shift_args false) # Shifts 1 position
 ################################################################################
 shift_args() {
-    local has_value="${1:-false}"
+	local has_value="${1:-false}"
 
-    if [[ "$has_value" == "true" ]]; then
-        echo 2
-    else
-        echo 1
-    fi
+	if [[ "$has_value" == "true" ]]; then
+		echo 2
+	else
+		echo 1
+	fi
 }
-
 
 # =============================================================================
 # config
@@ -1800,45 +1794,45 @@ declare -a BERANODE_CONFIG_VALUES
 #   network=$(get_config "network")
 ################################################################################
 load_config() {
-    local config_file="$1"
+	local config_file="$1"
 
-    # Validate file exists
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
+	# Validate file exists
+	if [[ ! -f "$config_file" ]]; then
+		log_error "Config file not found: $config_file"
+		return 1
+	fi
 
-    # Validate JSON is well-formed
-    if ! jq empty "$config_file" 2>/dev/null; then
-        log_error "Invalid JSON in config file: $config_file"
-        return 1
-    fi
+	# Validate JSON is well-formed
+	if ! jq empty "$config_file" 2>/dev/null; then
+		log_error "Invalid JSON in config file: $config_file"
+		return 1
+	fi
 
-    # Clear existing config
-    BERANODE_CONFIG_KEYS=()
-    BERANODE_CONFIG_VALUES=()
+	# Clear existing config
+	BERANODE_CONFIG_KEYS=()
+	BERANODE_CONFIG_VALUES=()
 
-    # Load all scalars into parallel arrays using dot notation
-    # This single jq call replaces 80+ separate jq invocations
-    local count=0
-    while IFS='=' read -r key value; do
-        BERANODE_CONFIG_KEYS[$count]="$key"
-        BERANODE_CONFIG_VALUES[$count]="$value"
-        ((count++))
-    done < <(jq -r '
+	# Load all scalars into parallel arrays using dot notation
+	# This single jq call replaces 80+ separate jq invocations
+	local count=0
+	while IFS='=' read -r key value; do
+		BERANODE_CONFIG_KEYS[$count]="$key"
+		BERANODE_CONFIG_VALUES[$count]="$value"
+		((count++))
+	done < <(jq -r '
         [paths(scalars) as $p | {($p | join(".")): getpath($p)}]
         | add
         | to_entries[]
         | "\(.key)=\(.value)"
     ' "$config_file" 2>/dev/null)
 
-    if [[ $count -eq 0 ]]; then
-        log_error "No configuration values loaded from: $config_file"
-        return 1
-    fi
+	if [[ $count -eq 0 ]]; then
+		log_error "No configuration values loaded from: $config_file"
+		return 1
+	fi
 
-    log_info "Loaded $count configuration values from: $config_file"
-    return 0
+	log_info "Loaded $count configuration values from: $config_file"
+	return 0
 }
 
 ################################################################################
@@ -1857,21 +1851,21 @@ load_config() {
 #   port=$(get_config "nodes.0.ethrpc_port" "26657")
 ################################################################################
 get_config() {
-    local key="$1"
-    local default="${2:-}"
+	local key="$1"
+	local default="${2:-}"
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            echo "${BERANODE_CONFIG_VALUES[$i]}"
-            return 0
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			echo "${BERANODE_CONFIG_VALUES[$i]}"
+			return 0
+		fi
+	done
 
-    # Key not found, return default
-    echo "$default"
-    return 0
+	# Key not found, return default
+	echo "$default"
+	return 0
 }
 
 ################################################################################
@@ -1889,23 +1883,23 @@ get_config() {
 #   chain_id=$(get_config_required "clienttoml.chain_id") || return 1
 ################################################################################
 get_config_required() {
-    local key="$1"
-    local value
+	local key="$1"
+	local value
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            value="${BERANODE_CONFIG_VALUES[$i]}"
-            if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
-                echo "$value"
-                return 0
-            fi
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			value="${BERANODE_CONFIG_VALUES[$i]}"
+			if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
+				echo "$value"
+				return 0
+			fi
+		fi
+	done
 
-    log_error "Missing required config: $key"
-    return 1
+	log_error "Missing required config: $key"
+	return 1
 }
 
 ################################################################################
@@ -1925,20 +1919,20 @@ get_config_required() {
 #   fi
 ################################################################################
 has_config() {
-    local key="$1"
+	local key="$1"
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            local value="${BERANODE_CONFIG_VALUES[$i]}"
-            if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
-                return 0
-            fi
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			local value="${BERANODE_CONFIG_VALUES[$i]}"
+			if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
+				return 0
+			fi
+		fi
+	done
 
-    return 1
+	return 1
 }
 
 ################################################################################
@@ -1953,9 +1947,9 @@ has_config() {
 #   load_config "/new/config.json"
 ################################################################################
 clear_config() {
-    BERANODE_CONFIG_KEYS=()
-    BERANODE_CONFIG_VALUES=()
-    return 0
+	BERANODE_CONFIG_KEYS=()
+	BERANODE_CONFIG_VALUES=()
+	return 0
 }
 
 ################################################################################
@@ -1969,10 +1963,10 @@ clear_config() {
 #   print_config | grep "network"
 ################################################################################
 print_config() {
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        echo "${BERANODE_CONFIG_KEYS[$i]}=${BERANODE_CONFIG_VALUES[$i]}"
-    done | sort
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		echo "${BERANODE_CONFIG_KEYS[$i]}=${BERANODE_CONFIG_VALUES[$i]}"
+	done | sort
 }
 
 ################################################################################
@@ -1987,7 +1981,7 @@ print_config() {
 #   echo "Loaded $count config values"
 ################################################################################
 get_config_count() {
-    echo "${#BERANODE_CONFIG_KEYS[@]}"
+	echo "${#BERANODE_CONFIG_KEYS[@]}"
 }
 
 ################################################################################
@@ -2011,32 +2005,32 @@ get_config_count() {
 #   port=$(get_config "node.ethrpc_port")
 ################################################################################
 load_node_config() {
-    local config_file="$1"
-    local node_index="$2"
+	local config_file="$1"
+	local node_index="$2"
 
-    # Validate file exists
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
+	# Validate file exists
+	if [[ ! -f "$config_file" ]]; then
+		log_error "Config file not found: $config_file"
+		return 1
+	fi
 
-    # Extract node object and load into config with "node." prefix
-    local count=0
-    local base_count=${#BERANODE_CONFIG_KEYS[@]}
-    while IFS='=' read -r key value; do
-        # Prefix all keys with "node." to avoid conflicts
-        BERANODE_CONFIG_KEYS[$((base_count + count))]="node.$key"
-        BERANODE_CONFIG_VALUES[$((base_count + count))]="$value"
-        ((count++))
-    done < <(jq -r ".nodes[$node_index] | [paths(scalars) as \$p | {(\$p | join(\".\")): getpath(\$p)}] | add | to_entries[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
+	# Extract node object and load into config with "node." prefix
+	local count=0
+	local base_count=${#BERANODE_CONFIG_KEYS[@]}
+	while IFS='=' read -r key value; do
+		# Prefix all keys with "node." to avoid conflicts
+		BERANODE_CONFIG_KEYS[$((base_count + count))]="node.$key"
+		BERANODE_CONFIG_VALUES[$((base_count + count))]="$value"
+		((count++))
+	done < <(jq -r ".nodes[$node_index] | [paths(scalars) as \$p | {(\$p | join(\".\")): getpath(\$p)}] | add | to_entries[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
-    if [[ $count -eq 0 ]]; then
-        log_error "Node $node_index not found in config file: $config_file"
-        return 1
-    fi
+	if [[ $count -eq 0 ]]; then
+		log_error "Node $node_index not found in config file: $config_file"
+		return 1
+	fi
 
-    log_info "Loaded node $node_index configuration ($count values)"
-    return 0
+	log_info "Loaded node $node_index configuration ($count values)"
+	return 0
 }
 
 ################################################################################
@@ -2055,10 +2049,10 @@ load_node_config() {
 #   port=$(get_node_config "ethrpc_port" "26657")
 ################################################################################
 get_node_config() {
-    local key="$1"
-    local default="${2:-}"
+	local key="$1"
+	local default="${2:-}"
 
-    get_config "node.$key" "$default"
+	get_config "node.$key" "$default"
 }
 
 ################################################################################
@@ -2077,25 +2071,24 @@ get_node_config() {
 #   set_config "custom.field" "value"
 ################################################################################
 set_config() {
-    local key="$1"
-    local value="$2"
+	local key="$1"
+	local value="$2"
 
-    # Search for existing key and update, or append new key-value pair
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            BERANODE_CONFIG_VALUES[$i]="$value"
-            return 0
-        fi
-    done
+	# Search for existing key and update, or append new key-value pair
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			BERANODE_CONFIG_VALUES[$i]="$value"
+			return 0
+		fi
+	done
 
-    # Key not found, append new entry
-    local count=${#BERANODE_CONFIG_KEYS[@]}
-    BERANODE_CONFIG_KEYS[$count]="$key"
-    BERANODE_CONFIG_VALUES[$count]="$value"
-    return 0
+	# Key not found, append new entry
+	local count=${#BERANODE_CONFIG_KEYS[@]}
+	BERANODE_CONFIG_KEYS[$count]="$key"
+	BERANODE_CONFIG_VALUES[$count]="$value"
+	return 0
 }
-
 
 # =============================================================================
 # utils
@@ -2404,7 +2397,6 @@ ensure_dir_exists() {
 	log_info "${description} exists: ${dir_path}"
 }
 
-
 # =============================================================================
 # validation
 # Source: lib/validation.sh
@@ -2597,7 +2589,7 @@ validate_comet_address() {
 # Returns: 0 if valid, 1 if invalid
 validate_mode() {
 	local value="$1"
-	[[ "$value" =~ ^(local|dev|testnet|mainnet)$ ]]
+	[[ "$value" =~ ^(local|docker)$ ]]
 }
 
 # Validates role (validator, full_node, pruned_node)
@@ -2840,7 +2832,6 @@ export -f validate_node_object
 export -f validate_deposit_object
 export -f validate_config_field
 export -f validate_beranodes_config
-
 
 # =============================================================================
 # genesis
@@ -3516,7 +3507,7 @@ generate_eth_genesis_file() {
 			shift 2
 			;;
 		*)
-			echo "Unknown flag: $1"
+			echo "generate_eth_genesis_file: Unknown flag: $1"
 			shift
 			;;
 		esac
@@ -3707,22 +3698,22 @@ generate_eth_genesis_file() {
 			contract_alloc_lines+=("${indent}\"${eth_genesis_beacon_deposit_address}\": {")
 			contract_alloc_lines+=("${indent}  \"balance\": \"${eth_genesis_beacon_deposit_balance}\",")
 			contract_alloc_lines+=("${indent}  \"nonce\": \"${eth_genesis_beacon_deposit_nonce}\",")
-		if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -gt 0 && -n "${eth_genesis_beacon_deposit_storage_key[0]}" ]]; then
-			contract_alloc_lines+=("${indent}  \"code\": \"${eth_genesis_beacon_deposit_code}\",")
-			contract_alloc_lines+=("${indent}  \"storage\": {")
-			# Split storage keys/values on comma if string contains ',' (to support "0x1,0x2" format)
-			storage_keys=()
-			storage_values=()
-			if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_key[0]}" == *,* ]]; then
-				IFS=',' read -ra storage_keys <<<"${eth_genesis_beacon_deposit_storage_key[0]}"
-			else
-				storage_keys=("${eth_genesis_beacon_deposit_storage_key[@]}")
-			fi
-			if [[ "${#eth_genesis_beacon_deposit_storage_value[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_value[0]}" == *,* ]]; then
-				IFS=',' read -ra storage_values <<<"${eth_genesis_beacon_deposit_storage_value[0]}"
-			else
-				storage_values=("${eth_genesis_beacon_deposit_storage_value[@]}")
-			fi
+			if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -gt 0 && -n "${eth_genesis_beacon_deposit_storage_key[0]}" ]]; then
+				contract_alloc_lines+=("${indent}  \"code\": \"${eth_genesis_beacon_deposit_code}\",")
+				contract_alloc_lines+=("${indent}  \"storage\": {")
+				# Split storage keys/values on comma if string contains ',' (to support "0x1,0x2" format)
+				storage_keys=()
+				storage_values=()
+				if [[ "${#eth_genesis_beacon_deposit_storage_key[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_key[0]}" == *,* ]]; then
+					IFS=',' read -ra storage_keys <<<"${eth_genesis_beacon_deposit_storage_key[0]}"
+				else
+					storage_keys=("${eth_genesis_beacon_deposit_storage_key[@]}")
+				fi
+				if [[ "${#eth_genesis_beacon_deposit_storage_value[@]}" -eq 1 && "${eth_genesis_beacon_deposit_storage_value[0]}" == *,* ]]; then
+					IFS=',' read -ra storage_values <<<"${eth_genesis_beacon_deposit_storage_value[0]}"
+				else
+					storage_values=("${eth_genesis_beacon_deposit_storage_value[@]}")
+				fi
 
 				storage_len=${#storage_keys[@]}
 				for i in "${!storage_keys[@]}"; do
@@ -3955,10 +3946,13 @@ EOF
 # =============================================================================
 generate_base_beacond_config() {
 	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_base_beacond_config" >&2
-	local config_dir="$1"
-	local chain_spec="$2"
-	local chain_id="$3"
+	local config_dir=""
+	local chain_spec=""
+	local chain_id=""
+	local mode="local"
 	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
+	local docker_beacond_tag=""
+	local docker_berareth_tag=""
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -3985,25 +3979,46 @@ generate_base_beacond_config() {
 			fi
 			shift 2
 			;;
+		--mode)
+			check_mode="$2"
+			if [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
+				mode="$check_mode"
+			else
+				log_error "Unknown mode: ${check_mode}"
+				return 1
+			fi
+			shift 2
+			;;
+		--docker-beacond-tag)
+			docker_beacond_tag="$2"
+			shift 2
+			;;
+		--docker-berareth-tag)
+			docker_berareth_tag="$2"
+			shift 2
+			;;
 		*)
-			echo "Unknown flag: $1"
-			shift
+
+			log_error "generate_base_beacond_config: Unknown flag: $1"
+			return 1
 			;;
 		esac
 	done
 
-	# Check if bin/bera-reth exists in ${config_dir}/bin and is executable
-	local bera_reth_binary="${config_dir}/bin/bera-reth"
-	if [[ ! -x "${bera_reth_binary}" ]]; then
-		log_error "bera-reth binary not found or not executable at: ${bera_reth_binary}"
-		return 1
-	fi
+	if [[ "$mode" == "local" ]]; then
+		# Check if bin/bera-reth exists in ${config_dir}/bin and is executable
+		local bera_reth_binary="${config_dir}/bin/bera-reth"
+		if [[ ! -x "${bera_reth_binary}" ]]; then
+			log_error "bera-reth binary not found or not executable at: ${bera_reth_binary}"
+			return 1
+		fi
 
-	# Check if bin/beacond exists in ${config_dir}/bin and is executable
-	local beacond_binary="${config_dir}/bin/beacond"
-	if [[ ! -x "${beacond_binary}" ]]; then
-		log_error "beacond binary not found or not executable at: ${beacond_binary}"
-		return 1
+		# Check if bin/beacond exists in ${config_dir}/bin and is executable
+		local beacond_binary="${config_dir}/bin/beacond"
+		if [[ ! -x "${beacond_binary}" ]]; then
+			log_error "beacond binary not found or not executable at: ${beacond_binary}"
+			return 1
+		fi
 	fi
 
 	# Clean up any existing beacond directory
@@ -4040,7 +4055,7 @@ generate_base_beacond_config() {
 		return 1
 	fi
 	nodes_count=$(echo "$nodes_json" | jq 'length')
-	echo "Number of nodes: $nodes_count"
+	log_info "Number of nodes: $nodes_count"
 
 	# Retrieve withdraw address from beranodes.config.json
 	withdraw_address="$(jq -r '.wallet_address' "${beranode_config_file}")"
@@ -4049,14 +4064,18 @@ generate_base_beacond_config() {
 		return 1
 	fi
 
-	echo "Initializing beacond nodes..."
+	log_info "Initializing beacond nodes..."
 	for ((i = 0; i < nodes_count; i++)); do
 		node_json=$(echo "$nodes_json" | jq ".[$i]")
 		local moniker=$(echo "$node_json" | jq -r '.moniker')
 		local role=$(echo "$node_json" | jq -r '.role')
 
 		mkdir -p "${config_dir}/tmp/beacond"
-		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		if [[ "$mode" == "docker" ]]; then
+			docker run -it --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+		else
+			${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
 			return 1
@@ -4088,14 +4107,21 @@ generate_base_beacond_config() {
 		fi
 
 		# Read validator keys
-		validator_keys=""
-		validator_keys="$(${beacond_binary} deposit validator-keys --home ${config_dir}/tmp/beacond)"
+		if [[ "$mode" == "docker" ]]; then
+			validator_keys=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond deposit validator-keys --home /tmp)
+		else
+			validator_keys="$(${beacond_binary} deposit validator-keys --home ${config_dir}/tmp/beacond)"
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to read validator keys at ${config_dir}/tmp/beacond"
 			return 1
 		fi
 
-		node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+		if [[ "$mode" == "docker" ]]; then
+			node_id=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home /tmp)
+		else
+			node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to read node id at ${config_dir}/tmp/beacond"
 			return 1
@@ -4104,7 +4130,11 @@ generate_base_beacond_config() {
 		premined_deposit_json="null"
 		if [[ "$role" == "validator" ]]; then
 			# Add premined deposit
-			${beacond_binary} genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
+			if [[ "$mode" == "docker" ]]; then
+				docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${chain_spec} --home /tmp
+			else
+				${beacond_binary} genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
+			fi
 			if [[ $? -ne 0 ]]; then
 				log_error "Failed to add premined deposit at ${config_dir}/tmp/beacond"
 				return 1
@@ -4135,7 +4165,11 @@ generate_base_beacond_config() {
 		deposit_amount=$GENESIS_DEPOSIT_AMOUNT
 
 		# Generate JWT file
-		${beacond_binary} >/dev/null 2>&1 jwt generate -o ${config_dir}/tmp/beacond/jwt.hex
+		if [[ "$mode" == "docker" ]]; then
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond jwt generate -o /tmp/jwt.hex >/dev/null 2>&1
+		else
+			${beacond_binary} >/dev/null 2>&1 jwt generate -o ${config_dir}/tmp/beacond/jwt.hex
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to generate JWT file at ${jwt_file}"
 			return 1
@@ -4253,6 +4287,9 @@ generate_base_beacond_config() {
 # =============================================================================
 generate_beacond_genesis_file_and_premined_deposits_storage() {
 	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: generate_beacond_genesis_file_and_premined_deposits_storage" >&2
+	local mode="local"
+	local docker_beacond_tag=""
+	local docker_berareth_tag=""
 	local config_dir="$1"
 	local chain_spec="$2"
 	local chain_id=""
@@ -4290,8 +4327,26 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 			chain_id="$2"
 			shift 2
 			;;
+		--mode)
+			check_mode="$2"
+			if [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
+				mode="$check_mode"
+			else
+				log_error "Unknown mode: ${check_mode}"
+				return 1
+			fi
+			shift 2
+			;;
+		--docker-beacond-tag)
+			docker_beacond_tag="$2"
+			shift 2
+			;;
+		--docker-berareth-tag)
+			docker_berareth_tag="$2"
+			shift 2
+			;;
 		*)
-			echo "Unknown flag: $1"
+			echo "generate_beacond_genesis_file_and_premined_deposits_storage: Unknown flag: $1"
 			shift
 			;;
 		esac
@@ -4310,17 +4365,29 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 	fi
 
 	# Check if existing genesis.json file exists in ${config_dir}/tmp/genesis.json
-	# TODO refactor as a prompt or remove
 	local genesis_file="${config_dir}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
 	if [ -f "${genesis_file}" ]; then
 		log_info "Genesis file already exists at ${genesis_file}"
+		read -p "Do you want to overwrite the existing genesis file? [y/n]: " overwrite_input
+		case "$overwrite_input" in
+		[yY][eE][sS] | [yY])
+			log_info "Overwriting existing genesis file at ${genesis_file}."
+			;;
+		*)
+			log_info "Aborting: Genesis file will NOT be overwritten."
+			return 0
+			;;
+		esac
 	fi
 
 	# Check if bin/beacond exists in ${config_dir}/bin and is executable
-	local beacond_binary="${config_dir}/bin/beacond"
-	if [[ ! -x "${beacond_binary}" ]]; then
-		log_error "beacond binary not found or not executable at: ${beacond_binary}"
-		return 1
+	local beacond_binary=null
+	if [[ "$mode" == "local" ]]; then
+		beacond_binary="${config_dir}/bin/beacond"
+		if [[ ! -x "${beacond_binary}" ]]; then
+			log_error "beacond binary not found or not executable at: ${beacond_binary}"
+			return 1
+		fi
 	fi
 
 	# Retrieve all the .nodes from the beranodes.config.json file
@@ -4382,7 +4449,11 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 	fi
 
 	# beacond init
-	${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+	if [[ "$mode" == "docker" ]]; then
+		docker run -it --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+	else
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+	fi
 	if [[ $? -ne 0 ]]; then
 		log_error "Failed to initialize beacond node at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 		return 1
@@ -4495,7 +4566,11 @@ EOF
 			fi
 		done
 
-		${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		if [[ "$mode" == "docker" ]]; then
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home /tmp
+		else
+			${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to collect premined deposits at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 			return 1
@@ -4534,7 +4609,11 @@ EOF
 		log_success "Copied .app_state.beacon.deposits from ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} to beranodes.config.json"
 
 		# generate validator root
-		validator_root=$(${beacond_binary} genesis validator-root ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond)
+		if [[ "$mode" == "docker" ]]; then
+			validator_root=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis validator-root /tmp/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp)
+		else
+			validator_root=$(${beacond_binary} genesis validator-root ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond)
+		fi
 		if [[ $? -ne 0 ]] || [[ -z "$validator_root" ]]; then
 			log_error "Failed to generate validator root at ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
 			return 1
@@ -4551,7 +4630,12 @@ EOF
 
 		# Modifies eth-genesis.json file to set deposit storage
 		# set deposit storage - makes a copy of the eth-genesis.json file to ${config_dir}${BERANODES_PATH_TMP}/beacond/eth-genesis.json and modifies the 0x4242... storage slots
-		${beacond_binary} genesis set-deposit-storage ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		if [[ "$mode" == "docker" ]]; then
+			cp ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} ${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis set-deposit-storage /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp
+		else
+			${beacond_binary} genesis set-deposit-storage ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		fi
 		if [[ $? -ne 0 ]] || [[ ! -f "${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}" ]]; then
 			log_error "Failed to set deposit storage at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 			return 1
@@ -4570,7 +4654,12 @@ EOF
 
 		# Modifies genesis.json file to set execution payload
 		# execution payload
-		${beacond_binary} genesis execution-payload ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		if [[ "$mode" == "docker" ]]; then
+			cp ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} ${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis execution-payload /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp
+		else
+			${beacond_binary} genesis execution-payload ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to set execution payload at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
 			return 1
@@ -4603,17 +4692,7 @@ EOF
 	else
 		log_success "Ensured removal of beacond directory at ${config_dir}${BERANODES_PATH_TMP}/beacond"
 	fi
-
-	# Ensure that bera-reth directory is removed, regardless of its existence
-	rm -rf "${config_dir}${BERANODES_PATH_TMP}/bera-reth"
-	if [[ -d "${config_dir}${BERANODES_PATH_TMP}/bera-reth" ]]; then
-		log_error "Failed to remove bera-reth directory at ${config_dir}${BERANODES_PATH_TMP}/bera-reth"
-		return 1
-	else
-		log_success "Ensured removal of bera-reth directory at ${config_dir}${BERANODES_PATH_TMP}/bera-reth"
-	fi
 }
-
 
 # =============================================================================
 # download
@@ -4621,35 +4700,35 @@ EOF
 # =============================================================================
 
 fetch_github_release() {
-  local release_url="$1"
+	local release_url="$1"
 
-  log_info "Checking binary from: $release_url"
+	log_info "Checking binary from: $release_url"
 
-  # Check if the URL doesn't return a 404 before using it
-  local response=$(curl -s -w "\n%{http_code}" "$release_url")
-  local http_status=$(echo "$response" | tail -n1)
-  local response_body=$(echo "$response" | sed '$d')
+	# Check if the URL doesn't return a 404 before using it
+	local response=$(curl -s -w "\n%{http_code}" "$release_url")
+	local http_status=$(echo "$response" | tail -n1)
+	local response_body=$(echo "$response" | sed '$d')
 
-  if [[ "$http_status" == "404" ]]; then
-    log_error "Release URL not found (404): $release_url"
-    return 1
-  fi
+	if [[ "$http_status" == "404" ]]; then
+		log_error "Release URL not found (404): $release_url"
+		return 1
+	fi
 
-  # Check if the response is valid JSON (for GitHub API)
-  if ! echo "$response_body" | jq . >/dev/null 2>&1; then
-    log_error "Response from $release_url is not valid JSON."
-    return 1
-  fi
+	# Check if the response is valid JSON (for GitHub API)
+	if ! echo "$response_body" | jq . >/dev/null 2>&1; then
+		log_error "Response from $release_url is not valid JSON."
+		return 1
+	fi
 
-  local version=$(echo "$response_body" | jq -r '.tag_name')
-  if [[ "$version" == "null" ]]; then
-    log_error "Failed to get version from response"
-    return 1
-  fi
+	local version=$(echo "$response_body" | jq -r '.tag_name')
+	if [[ "$version" == "null" ]]; then
+		log_error "Failed to get version from response"
+		return 1
+	fi
 
-  log_info "Using version: $version"
-  echo "$response_body"
-  return 0
+	log_info "Using version: $version"
+	echo "$response_body"
+	return 0
 }
 
 ################################################################################
@@ -4661,23 +4740,23 @@ fetch_github_release() {
 #   1 - Failure (unsupported platform)
 ################################################################################
 detect_platform_arch() {
-  local arch="unknown"
+	local arch="unknown"
 
-  if [[ "$IS_MACOS" == true ]]; then
-    arch="darwin-arm64"
-  elif [[ "$IS_LINUX" == true ]]; then
-    if [[ "$IS_LINUX_ARM" == true ]]; then
-      arch="linux-arm64"
-    else
-      arch="linux-amd64"
-    fi
-  else
-    log_error "Unsupported platform: $PLATFORM - $ARCH"
-    return 1
-  fi
+	if [[ "$IS_MACOS" == true ]]; then
+		arch="darwin-arm64"
+	elif [[ "$IS_LINUX" == true ]]; then
+		if [[ "$IS_LINUX_ARM" == true ]]; then
+			arch="linux-arm64"
+		else
+			arch="linux-amd64"
+		fi
+	else
+		log_error "Unsupported platform: $PLATFORM - $ARCH"
+		return 1
+	fi
 
-  echo "$arch"
-  return 0
+	echo "$arch"
+	return 0
 }
 
 ################################################################################
@@ -4693,18 +4772,18 @@ detect_platform_arch() {
 #   1 - Failure (no URL found)
 ################################################################################
 extract_download_url() {
-  local response_body="$1"
-  local arch="$2"
+	local response_body="$1"
+	local arch="$2"
 
-  local download_url=$(echo "$response_body" | jq -r ".assets[] | select(.name | contains(\"$arch\") and endswith(\".tar.gz\") and (contains(\".sig\") | not)) | .browser_download_url")
+	local download_url=$(echo "$response_body" | jq -r ".assets[] | select(.name | contains(\"$arch\") and endswith(\".tar.gz\") and (contains(\".sig\") | not)) | .browser_download_url")
 
-  if [[ -z "$download_url" ]]; then
-    log_error "No download URL found for the required binary for '$arch'."
-    return 1
-  fi
+	if [[ -z "$download_url" ]]; then
+		log_error "No download URL found for the required binary for '$arch'."
+		return 1
+	fi
 
-  echo "$download_url"
-  return 0
+	echo "$download_url"
+	return 0
 }
 
 ################################################################################
@@ -4721,38 +4800,38 @@ extract_download_url() {
 #   1 - Failure (download or extraction failed)
 ################################################################################
 download_and_extract_binary() {
-  local download_url="$1"
-  local bin_dir="$2"
-  local binary_name="$3"
+	local download_url="$1"
+	local bin_dir="$2"
+	local binary_name="$3"
 
-  # Ensure the bin directory exists
-  ensure_dir_exists "$bin_dir" "binary directory: $bin_dir"
+	# Ensure the bin directory exists
+	ensure_dir_exists "$bin_dir" "binary directory: $bin_dir"
 
-  log_info "Downloading $binary_name from $download_url"
+	log_info "Downloading $binary_name from $download_url"
 
-  local tar_file_name=$(basename "$download_url")
-  curl -L --output-dir "$bin_dir" -O "$download_url"
-  if [[ $? -ne 0 ]]; then
-    log_error "Failed to download $binary_name from $download_url"
-    return 1
-  fi
-  log_success "Downloaded ${tar_file_name} to ${bin_dir}"
+	local tar_file_name=$(basename "$download_url")
+	curl -L --output-dir "$bin_dir" -O "$download_url"
+	if [[ $? -ne 0 ]]; then
+		log_error "Failed to download $binary_name from $download_url"
+		return 1
+	fi
+	log_success "Downloaded ${tar_file_name} to ${bin_dir}"
 
-  # Extract the tarball
-  tar -xzf "${bin_dir}/${tar_file_name}" -C "$bin_dir"
-  if [[ $? -ne 0 ]]; then
-    log_error "Failed to extract ${tar_file_name}"
-    return 1
-  fi
+	# Extract the tarball
+	tar -xzf "${bin_dir}/${tar_file_name}" -C "$bin_dir"
+	if [[ $? -ne 0 ]]; then
+		log_error "Failed to extract ${tar_file_name}"
+		return 1
+	fi
 
-  # Rename the extracted file to the binary name
-  local file_name="${tar_file_name%.tar.gz}"
-  mv "${bin_dir}/${file_name}" "${bin_dir}/${binary_name}"
+	# Rename the extracted file to the binary name
+	local file_name="${tar_file_name%.tar.gz}"
+	mv "${bin_dir}/${file_name}" "${bin_dir}/${binary_name}"
 
-  # Set executable permissions
-  chmod +x "${bin_dir}/${binary_name}"
+	# Set executable permissions
+	chmod +x "${bin_dir}/${binary_name}"
 
-  return 0
+	return 0
 }
 
 ################################################################################
@@ -4768,24 +4847,24 @@ download_and_extract_binary() {
 #   1 - Failure (binary not executable or no version)
 ################################################################################
 verify_binary() {
-  local binary_path="$1"
-  local version_flag="$2"
-  local binary_name=$(basename "$binary_path")
+	local binary_path="$1"
+	local version_flag="$2"
+	local binary_name=$(basename "$binary_path")
 
-  if [[ ! -x "$binary_path" ]]; then
-    log_error "Binary ${binary_name} is not executable."
-    return 1
-  fi
+	if [[ ! -x "$binary_path" ]]; then
+		log_error "Binary ${binary_name} is not executable."
+		return 1
+	fi
 
-  local binary_version=$("$binary_path" $version_flag 2>&1)
-  if [[ -z "$binary_version" ]]; then
-    log_error "Failed to get version from ${binary_name}."
-    return 1
-  fi
+	local binary_version=$("$binary_path" $version_flag 2>&1)
+	if [[ -z "$binary_version" ]]; then
+		log_error "Failed to get version from ${binary_name}."
+		return 1
+	fi
 
-  log_success "Binary ${binary_name} is executable."
-  log_info "$binary_version"
-  return 0
+	log_success "Binary ${binary_name} is executable."
+	log_info "$binary_version"
+	return 0
 }
 
 ################################################################################
@@ -4797,202 +4876,200 @@ verify_binary() {
 # into helper functions.
 ################################################################################
 download_beranodes_binary() {
-  [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: download_beranodes_binary" >&2
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: download_beranodes_binary" >&2
 
-  # Local variables
-  local config_dir="${BERANODES_PATH_DEFAULT}"
-  local bin_dir="${config_dir}${BERANODES_PATH_BIN}"
-  local binary_to_download="" # either $BIN_BERARETH or $BIN_BEACONKIT
-  local version_tag="latest"
-  local is_docker=false
+	# Local variables
+	local config_dir="${BERANODES_PATH_DEFAULT}"
+	local bin_dir="${config_dir}${BERANODES_PATH_BIN}"
+	local binary_to_download="" # either $BIN_BERARETH or $BIN_BEACONKIT
+	local version_tag="latest"
+	local is_docker=false
 
-  # Parse flags
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-    --config-dir)
-      if [[ -n "$2" ]]; then
-        check_dir="$2"
-        if [[ ! -d "$check_dir" ]]; then
-          log_warn "Config directory not found at $check_dir, using default directory ${BERANODES_PATH_DEFAULT}"
-        else
-          config_dir="$check_dir"
-          bin_dir="${config_dir}${BERANODES_PATH_BIN}"
-        fi
-        shift 2
-      else
-        log_warn "--config-dir is not set. defaulting to ${BERANODES_PATH_DEFAULT}"
-        shift
-      fi
-      ;;
-    --binary-to-download)
-      if [[ -n "$2" ]]; then
-        check_binary_to_download="$2"
-        if [[ "$check_binary_to_download" != "$BIN_BERARETH" && "$check_binary_to_download" != "$BIN_BEACONKIT" ]]; then
-          log_error "--binary-to-download is not set to either '${BIN_BERARETH}' or '${BIN_BEACONKIT}'"
-          return 1
-        fi
-        binary_to_download="$check_binary_to_download"
-        shift 2
-      else
-        log_error "--binary-to-download is not set to either '${BIN_BERARETH}' or '${BIN_BEACONKIT}'"
-        return 1
-      fi
-      ;;
-    --version-tag)
-      if [[ -n "$2" ]]; then
-        check_version_tag="$2"
-        if [[ ! "$check_version_tag" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
-          return 1
-        fi
-        version_tag="$check_version_tag"
-        log_info "Using version tag: $version_tag"
-        shift 2
-      else
-        log_warn "--version-tag is not set. defaulting to ${version_tag}"
-        shift
-      fi
-      ;;
-    --docker)
-      is_docker=true
-      shift
-      ;;
-    *)
-      log_error "Unknown option: $1"
-      return 1
-      ;;
-    esac
-  done
+	# Parse flags
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--config-dir)
+			if [[ -n "$2" ]]; then
+				check_dir="$2"
+				if [[ ! -d "$check_dir" ]]; then
+					log_warn "Config directory not found at $check_dir, using default directory ${BERANODES_PATH_DEFAULT}"
+				else
+					config_dir="$check_dir"
+					bin_dir="${config_dir}${BERANODES_PATH_BIN}"
+				fi
+				shift 2
+			else
+				log_warn "--config-dir is not set. defaulting to ${BERANODES_PATH_DEFAULT}"
+				shift
+			fi
+			;;
+		--binary-to-download)
+			if [[ -n "$2" ]]; then
+				check_binary_to_download="$2"
+				if [[ "$check_binary_to_download" != "$BIN_BERARETH" && "$check_binary_to_download" != "$BIN_BEACONKIT" ]]; then
+					log_error "--binary-to-download is not set to either '${BIN_BERARETH}' or '${BIN_BEACONKIT}'"
+					return 1
+				fi
+				binary_to_download="$check_binary_to_download"
+				shift 2
+			else
+				log_error "--binary-to-download is not set to either '${BIN_BERARETH}' or '${BIN_BEACONKIT}'"
+				return 1
+			fi
+			;;
+		--version-tag)
+			if [[ -n "$2" ]]; then
+				check_version_tag="$2"
+				if [[ ! "$check_version_tag" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+					log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					return 1
+				fi
+				version_tag="$check_version_tag"
+				log_info "Using version tag: $version_tag"
+				shift 2
+			else
+				log_warn "--version-tag is not set. defaulting to ${version_tag}"
+				shift
+			fi
+			;;
+		--docker)
+			is_docker=true
+			shift
+			;;
+		*)
+			log_error "Unknown option: $1"
+			return 1
+			;;
+		esac
+	done
 
-  # Determine release URL based on binary type
-  local release_base_url=""
-  local version_cmd_flag=""
+	# Determine release URL based on binary type
+	local release_base_url=""
+	local version_cmd_flag=""
 
-  if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
-    release_base_url="$RELEASE_BERARETH"
-    version_cmd_flag="--version"
-  elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
-    release_base_url="$RELEASE_BEACONKIT"
-    version_cmd_flag="version"
-  else
-    log_error "No binary specified. Use --binary-to-download option."
-    return 1
-  fi
+	if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
+		release_base_url="$RELEASE_BERARETH"
+		version_cmd_flag="--version"
+	elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
+		release_base_url="$RELEASE_BEACONKIT"
+		version_cmd_flag="version"
+	else
+		log_error "No binary specified. Use --binary-to-download option."
+		return 1
+	fi
 
-  # Construct full release URL
-  local release_url="${release_base_url}/releases$( [[ "$version_tag" == "latest" ]] && echo "/latest" || echo "/tags/${version_tag}" )"
+	# Construct full release URL
+	local release_url="${release_base_url}/releases$([[ "$version_tag" == "latest" ]] && echo "/latest" || echo "/tags/${version_tag}")"
 
-  # Step 1: Fetch release information
-  local response_body
-  response_body=$(fetch_github_release "$release_url") || return 1
+	# Step 1: Fetch release information
+	local response_body
+	response_body=$(fetch_github_release "$release_url") || return 1
 
-  # Step 2: Detect platform and architecture
-  local arch
-  arch=$(detect_platform_arch) || return 1
+	# Step 2: Detect platform and architecture
+	local arch
+	arch=$(detect_platform_arch) || return 1
 
-  # Step 3: Extract download URL
-  local download_url
-  download_url=$(extract_download_url "$response_body" "$arch") || return 1
+	# Step 3: Extract download URL
+	local download_url
+	download_url=$(extract_download_url "$response_body" "$arch") || return 1
 
-  # Step 4: Download and extract binary
-  download_and_extract_binary "$download_url" "$bin_dir" "$binary_to_download" || return 1
+	# Step 4: Download and extract binary
+	download_and_extract_binary "$download_url" "$bin_dir" "$binary_to_download" || return 1
 
-  # Step 5: Verify binary is executable
-  verify_binary "${bin_dir}/${binary_to_download}" "$version_cmd_flag" || return 1
+	# Step 5: Verify binary is executable
+	verify_binary "${bin_dir}/${binary_to_download}" "$version_cmd_flag" || return 1
 
-  return 0
+	return 0
 }
 
 download_beranodes_docker_image() {
-  # Downloads the docker image for either bera-reth or beacon-kit
-  # Usage:
-  #   download_beranodes_docker_image --binary-to-download <BIN_BEACONKIT|BIN_BERARETH> [--version-tag <tag>]
-  local binary_to_download=""
-  local version_tag="latest"
-  local docker_image=""
-  local docker_pull_url=""
+	# Downloads the docker image for either bera-reth or beacon-kit
+	# Usage:
+	#   download_beranodes_docker_image --binary-to-download <BIN_BEACONKIT|BIN_BERARETH> [--version-tag <tag>]
+	local binary_to_download=""
+	local version_tag="latest"
+	local docker_image=""
+	local docker_pull_url=""
 
-  # Parse args
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --binary-to-download)
-        binary_to_download="$2"
-        shift 2
-        ;;
-      --version-tag)
-        version_tag="$2"
-        shift 2
-        ;;
-      *)
-        log_error "Unknown option to download_beranodes_docker_image: $1"
-        return 1
-        ;;
-    esac
-  done
+	# Parse args
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--binary-to-download)
+			binary_to_download="$2"
+			shift 2
+			;;
+		--version-tag)
+			version_tag="$2"
+			shift 2
+			;;
+		*)
+			log_error "Unknown option to download_beranodes_docker_image: $1"
+			return 1
+			;;
+		esac
+	done
 
-  if [[ -z "$binary_to_download" ]]; then
-    log_error "No binary specified. Use --binary-to-download option."
-    return 1
-  fi
+	if [[ -z "$binary_to_download" ]]; then
+		log_error "No binary specified. Use --binary-to-download option."
+		return 1
+	fi
 
-  # Resolve repo name for GitHub and Docker
-  local github_repo=""
-  if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
-    github_repo="berachain/bera-reth"
-  elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
-    github_repo="berachain/beacon-kit"
-  else
-    log_error "Unsupported binary for docker image: $binary_to_download"
-    return 1
-  fi
+	# Resolve repo name for GitHub and Docker
+	local github_repo=""
+	if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
+		github_repo="berachain/bera-reth"
+	elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
+		github_repo="berachain/beacon-kit"
+	else
+		log_error "Unsupported binary for docker image: $binary_to_download"
+		return 1
+	fi
 
-  # Normalize user-provided version_tag to "latest" or a direct tag
-  if [[ "$version_tag" == "latest" ]]; then
-    # Get latest release from GitHub API
-    version_tag=$(curl --silent "https://api.github.com/repos/${github_repo}/releases/latest" | grep -o '"tag_name": *"v[^"]*"' | head -1 | cut -d'"' -f4)
-    if [[ -z "$version_tag" ]]; then
-      log_warn "Failed to fetch latest release tag from GitHub, defaulting to 'latest'"
-      version_tag="latest"
-    fi
-  else
-    # Validate tag exists by pinging GitHub releases API for the tag
-    local tag_check
-    tag_check=$(curl --silent -o /dev/null -w "%{http_code}" "https://api.github.com/repos/${github_repo}/releases/tags/${version_tag}")
-    if [[ "$tag_check" != "200" ]]; then
-      log_error "Version tag '${version_tag}' does not exist in ${github_repo} releases."
-      return 1
-    fi
-  fi
+	# Normalize user-provided version_tag to "latest" or a direct tag
+	if [[ "$version_tag" == "latest" ]]; then
+		# Get latest release from GitHub API
+		version_tag=$(curl --silent "https://api.github.com/repos/${github_repo}/releases/latest" | grep -o '"tag_name": *"v[^"]*"' | head -1 | cut -d'"' -f4)
+		if [[ -z "$version_tag" ]]; then
+			log_warn "Failed to fetch latest release tag from GitHub, defaulting to 'latest'"
+			version_tag="latest"
+		fi
+	else
+		# Validate tag exists by pinging GitHub releases API for the tag
+		local tag_check
+		tag_check=$(curl --silent -o /dev/null -w "%{http_code}" "https://api.github.com/repos/${github_repo}/releases/tags/${version_tag}")
+		if [[ "$tag_check" != "200" ]]; then
+			log_error "Version tag '${version_tag}' does not exist in ${github_repo} releases."
+			return 1
+		fi
+	fi
 
-  # Remove any leading 'v' for docker image tags if present
-  if [[ "$version_tag" =~ ^v(.+) ]]; then
-    version_tag="v${BASH_REMATCH[1]}"
-  fi
+	# Remove any leading 'v' for docker image tags if present
+	if [[ "$version_tag" =~ ^v(.+) ]]; then
+		version_tag="v${BASH_REMATCH[1]}"
+	fi
 
-  # Determine docker image
-  if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
-    docker_image="${DOCKER_REGISTRY_BERARETH}"
-  elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
-    docker_image="${DOCKER_REGISTRY_BEACONKIT}"
-  else
-    log_error "Unsupported binary for docker image: $binary_to_download"
-    return 1
-  fi
+	# Determine docker image
+	if [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
+		docker_image="${DOCKER_REGISTRY_BERARETH}"
+	elif [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
+		docker_image="${DOCKER_REGISTRY_BEACONKIT}"
+	else
+		log_error "Unsupported binary for docker image: $binary_to_download"
+		return 1
+	fi
 
-  # Append the version tag (or "latest" by default)
-  docker_pull_url="${docker_image}:${version_tag}"
+	# Append the version tag (or "latest" by default)
+	docker_pull_url="${docker_image}:${version_tag}"
 
-  log_info "Pulling docker image: ${docker_pull_url}"
-  if docker pull "${docker_pull_url}"; then
-    log_success "Successfully pulled docker image: ${docker_pull_url}"
-    return 0
-  else
-    log_error "Failed to pull docker image: ${docker_pull_url}"
-    return 1
-  fi
+	log_info "Pulling docker image: ${docker_pull_url}"
+	if docker pull "${docker_pull_url}"; then
+		log_success "Successfully pulled docker image: ${docker_pull_url}"
+		return 0
+	else
+		log_error "Failed to pull docker image: ${docker_pull_url}"
+		return 1
+	fi
 }
-
-
 
 # =============================================================================
 # common
@@ -5147,7 +5224,6 @@ set -euo pipefail
 #    - Document required sourced modules (constants, utils, logging)
 #
 ################################################################################
-
 
 # =============================================================================
 # init
@@ -5503,23 +5579,23 @@ cmd_init() {
 	fi
 	log_success "Cast version is supported."
 
-  # Check curl version
-  check_curl_version
-  if [[ $? -ne 0 ]]; then
-    log_error "Curl version is not supported. Please upgrade to version $SUPPORTED_CURL_VERSION or higher."
-    return 1
-  fi
-  log_success "Curl version is supported."
+	# Check curl version
+	check_curl_version
+	if [[ $? -ne 0 ]]; then
+		log_error "Curl version is not supported. Please upgrade to version $SUPPORTED_CURL_VERSION or higher."
+		return 1
+	fi
+	log_success "Curl version is supported."
 
 	print_header "Initializing Berachain Node"
 
-  # Check for .tar.gz installed locally
-  check_tar_gz_version
-  if [[ $? -ne 0 ]]; then
-    log_error "Tar.gz version is not supported. Please upgrade to version $SUPPORTED_TAR_GZ_VERSION or higher."
-    return 1
-  fi
-  log_success "Tar.gz version is supported."
+	# Check for .tar.gz installed locally
+	check_tar_gz_version
+	if [[ $? -ne 0 ]]; then
+		log_error "Tar.gz version is not supported. Please upgrade to version $SUPPORTED_TAR_GZ_VERSION or higher."
+		return 1
+	fi
+	log_success "Tar.gz version is supported."
 
 	# =========================================================================
 	# [2] VARIABLE INITIALIZATION
@@ -5537,14 +5613,14 @@ cmd_init() {
 	local full_nodes=0
 	local pruned_nodes=0
 	local docker_mode=false
-  local docker_tag_beacond="latest"
-  local docker_tag_berareth="latest"
+	local docker_tag_beacond="latest"
+	local docker_tag_berareth="latest"
 	local mode="local"
 	local wallet_private_key=""
 	local wallet_address=""
 	local wallet_balance=${DEFAULT_WALLET_BALANCE}
-  local beacond_version="latest"
-  local berareth_version="latest"
+	local beacond_version="latest"
+	local berareth_version="latest"
 
 	# Client.toml configuration variables
 	local clienttoml_chain_id="${CLIENTTOML_CHAIN_ID}"
@@ -5764,38 +5840,38 @@ cmd_init() {
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-    --beacond-version)
-      if [[ -n "$2" ]]; then
-        check_beacond_version="$2"
-        if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
-          log_warn "defaulting to ${beacond_version}..."
-        else
-          beacond_version="$check_beacond_version"
-        fi
-        log_info "Using beacond version: $beacond_version"
-        shift 2
-      else
-        log_warn "--beacond-version is not set. defaulting to ${beacond_version}"
-        shift
-      fi
-      ;;
-    --berareth-version)
-      if [[ -n "$2" ]]; then
-        check_berareth_version="$2"
-        if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
-          log_warn "defaulting to ${berareth_version}..."
-        else
-          berareth_version="$check_berareth_version"
-        fi
-        log_info "Using berareth version: $berareth_version"
-        shift 2
-      else
-        log_warn "--berareth-version is not set. defaulting to ${berareth_version}"
-        shift
-      fi
-      ;;
+		--beacond-version)
+			if [[ -n "$2" ]]; then
+				check_beacond_version="$2"
+				if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+					log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					log_warn "defaulting to ${beacond_version}..."
+				else
+					beacond_version="$check_beacond_version"
+				fi
+				log_info "Using beacond version: $beacond_version"
+				shift 2
+			else
+				log_warn "--beacond-version is not set. defaulting to ${beacond_version}"
+				shift
+			fi
+			;;
+		--berareth-version)
+			if [[ -n "$2" ]]; then
+				check_berareth_version="$2"
+				if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+					log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					log_warn "defaulting to ${berareth_version}..."
+				else
+					berareth_version="$check_berareth_version"
+				fi
+				log_info "Using berareth version: $berareth_version"
+				shift 2
+			else
+				log_warn "--berareth-version is not set. defaulting to ${berareth_version}"
+				shift
+			fi
+			;;
 		--beranodes-dir)
 			BERANODES_PATH=$(parse_beranodes_dir "$2")
 			shift 2
@@ -5804,13 +5880,13 @@ cmd_init() {
 			docker_mode=true
 			mode="docker"
 			# Check if Docker is installed
-			if ! command -v docker &> /dev/null; then
+			if ! command -v docker &>/dev/null; then
 				log_error "Docker is not installed or not found in PATH. Please install Docker to continue."
 				exit 1
 			fi
 
 			# Check if Docker daemon is running
-			if ! docker info &> /dev/null; then
+			if ! docker info &>/dev/null; then
 				log_error "Docker daemon is not running. Please start Docker to continue."
 				exit 1
 			fi
@@ -5825,7 +5901,7 @@ cmd_init() {
 					docker_minor="${BASH_REMATCH[2]}"
 					docker_patch="${BASH_REMATCH[3]}"
 					# Compare version (minimum required: 20.10.0)
-					if (( docker_major < 20 )) || { (( docker_major == 20 )) && (( docker_minor < 10 )); }; then
+					if ((docker_major < 20)) || { ((docker_major == 20)) && ((docker_minor < 10)); }; then
 						log_error "Docker version 20.10.0 or newer is required. Current version: $docker_version"
 						exit 1
 					fi
@@ -5835,24 +5911,24 @@ cmd_init() {
 			fi
 			shift
 			;;
-    --docker-tag-berareth)
-      if [[ -n "$2" ]]; then
-        docker_tag_berareth="$2"
-        shift 2
-      else
-        log_warn "--docker-tag-berareth is not set. defaulting to latest"
-        docker_tag_berareth="latest"
-      fi
-      ;;
-    --docker-tag-beacond)
-      if [[ -n "$2" ]]; then
-        docker_tag_beacond="$2"
-        shift 2
-      else
-        log_warn "--docker-tag-beacond is not set. defaulting to latest"
-        docker_tag_beacond="latest"
-      fi
-      ;;
+		--docker-tag-berareth)
+			if [[ -n "$2" ]]; then
+				docker_tag_berareth="$2"
+				shift 2
+			else
+				log_warn "--docker-tag-berareth is not set. defaulting to latest"
+				docker_tag_berareth="latest"
+			fi
+			;;
+		--docker-tag-beacond)
+			if [[ -n "$2" ]]; then
+				docker_tag_beacond="$2"
+				shift 2
+			else
+				log_warn "--docker-tag-beacond is not set. defaulting to latest"
+				docker_tag_beacond="latest"
+			fi
+			;;
 		--moniker)
 			if [[ -n "$2" ]]; then
 				moniker="$2"
@@ -7456,82 +7532,144 @@ cmd_init() {
 	# [6] BINARY VERIFICATION
 	# =========================================================================
 	# Verify beacond and bera-reth binaries exist and are executable
-  if { [[ "$mode" == "local" ]] || [[ "$mode" == "docker" ]]; } && [[ "$IS_MACOS" == "true" ]]; then
-    if [[ "$mode" == "docker" ]]; then
-      log_warn "${YELLOW}Normal docker mode on MacOS is not supported. Continuing with build from source approach.${RESET}"
-    fi
+	if [[ "$mode" == "local" ]]; then
+		missing_binaries=0
+		# - beacond
+		is_beacond_installed=false
+		if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
+			log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
+		else
+			# Check if 'beacond version' command executes successfully
+			beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
+			if [[ $? -eq 0 ]]; then
+				log_success "'${BIN_BEACONKIT} version' works as expected."
+				log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
+				is_beacond_installed=true
+			else
+				log_error "'${BIN_BEACONKIT} version' did not work as expected."
+			fi
+		fi
 
-    missing_binaries=0
-    # - beacond
-    is_beacond_installed=false
-    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
-      log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
-    else
-      # Check if 'beacond version' command executes successfully
-      beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
-      if [[ $? -eq 0 ]]; then
-        log_success "'${BIN_BEACONKIT} version' works as expected."
-        log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
-        is_beacond_installed=true
-      else
-        log_error "'${BIN_BEACONKIT} version' did not work as expected."
-      fi
-    fi
+		if [[ "$is_beacond_installed" == false ]]; then
+			log_info "Installing beacond binary..."
+			download_beranodes_binary \
+				--config-dir "${BERANODES_PATH}" \
+				--binary-to-download "${BIN_BEACONKIT}" \
+				--version-tag "latest"
+		fi
 
-    if [[ "$is_beacond_installed" == false ]]; then
-      log_info "Installing beacond binary..."
-      download_beranodes_binary \
-        --config-dir "${BERANODES_PATH}" \
-        --binary-to-download "${BIN_BEACONKIT}" \
-        --version-tag "latest"
-    fi
+		# - berareth
+		is_berareth_installed=false
+		if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
+			log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
+			missing_binaries=1
+		else
+			# Check if 'berareth version' command executes successfully
+			bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
+			if [[ $? -eq 0 ]]; then
+				log_success "'${BIN_BERARETH} --version' works as expected."
+				log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
+				is_berareth_installed=true
+			else
+				log_error "'${BIN_BERARETH} --version' did not work as expected."
+			fi
+		fi
 
-    # - berareth
-    is_berareth_installed=false
-    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
-      log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
-      missing_binaries=1
-    else
-      # Check if 'berareth version' command executes successfully
-      bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
-      if [[ $? -eq 0 ]]; then
-        log_success "'${BIN_BERARETH} --version' works as expected."
-        log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
-        is_berareth_installed=true
-      else
-        log_error "'${BIN_BERARETH} --version' did not work as expected."
-      fi
-    fi
+		if [[ "$is_berareth_installed" == false ]]; then
+			log_info "Installing bera-reth binary..."
+			download_beranodes_binary \
+				--config-dir "${BERANODES_PATH}" \
+				--binary-to-download "${BIN_BERARETH}" \
+				--version-tag "latest"
+		fi
+	# Mode meant for linux only
+	elif [[ "$mode" == "docker" ]]; then
+		if [[ "$IS_MACOS" == "true" ]]; then
+			log_warn "${YELLOW}Normal docker mode on MacOS is not supported. Continuing with build from source approach.${RESET}"
+			# Prompt user for confirmation before proceeding with building docker containers from source
+			echo -e "${YELLOW}==========================================${RESET}"
+			echo -e "${YELLOW}Are you sure you want to continue?${RESET}"
+			echo -e "${YELLOW}This will add a few minutes to build the docker containers from source.${RESET}"
+			echo -e "${YELLOW}==========================================${RESET}"
+			read -p "Continue? (y/n): " confirm_build
+			case "$confirm_build" in
+			y | Y | yes | Yes | YES)
+				log_info "Proceeding with build from source..."
+				;;
+			*)
+				log_warn "Initialization aborted by user."
+				exit 1
+				;;
+			esac
 
-    if [[ "$is_berareth_installed" == false ]]; then
-      log_info "Installing bera-reth binary..."
-      download_beranodes_binary \
-        --config-dir "${BERANODES_PATH}" \
-        --binary-to-download "${BIN_BERARETH}" \
-        --version-tag "latest"
-    fi
-  # Mode meant for linux only
-  elif [[ "$mode" == "docker" ]]; then
-    # Check for existing bera-reth docker image
-    bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
-    if [[ -n "$bera_reth_image" ]]; then
-      bera_reth_tag=$(echo "$bera_reth_image" | awk -F: '{print $2}')
-      log_success "Found existing bera-reth docker image: $bera_reth_image (tag: $bera_reth_tag)"
-    else
-      log_info "No bera-reth-docker image found. Downloading '${docker_tag_berareth}'..."
-      download_beranodes_docker_image --binary-to-download "${BIN_BERARETH}" --version-tag "${docker_tag_berareth}"
-    fi
+			# Get tags
+			docker_berareth_tag=$(curl -sI https://github.com/berachain/bera-reth/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+			docker_beacond_tag=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
 
-    # Check for existing beacond docker image
-    beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'beacond-docker' || true)
-    if [[ -n "$beacond_image" ]]; then
-      beacond_tag=$(echo "$beacond_image" | awk -F: '{print $2}')
-      log_success "Found existing beacond docker image: $beacond_image (tag: $beacond_tag)"
-    else
-      log_info "No beacond-docker image found. Downloading '${docker_tag_beacond}..."
-      download_beranodes_docker_image --binary-to-download "${BIN_BEACONKIT}" --version-tag "${docker_tag_beacond}"
-    fi
-  fi
+			# Check for existing docker image
+			has_docker_berareth_image=false
+			has_docker_beacond_image=false
+
+			docker_berareth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-bera-reth:${docker_berareth_tag}" || true)
+			if [[ -n "$docker_berareth_image" ]]; then
+				has_docker_berareth_image=true
+				log_success "Found existing docker-bera-reth image: docker-bera-reth:${docker_berareth_tag}"
+			fi
+			docker_beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-beacond:${docker_beacond_tag}" || true)
+			if [[ -n "$docker_beacond_image" ]]; then
+				has_docker_beacond_image=true
+				log_success "Found existing docker-beacond image: docker-beacond:${docker_beacond_tag}"
+			fi
+
+			# Build docker images if they don't exist
+			# - bera-reth
+			if [[ "$has_docker_berareth_image" == false ]]; then
+				log_info "Building docker-bera-reth image: ${docker_berareth_tag}"
+				docker build -f scripts/Dockerfile.berareth.template --build-arg BERA_RETH_TAG=${docker_berareth_tag} -t docker-bera-reth:${docker_berareth_tag} .
+			fi
+			# - beacond
+			if [[ "$has_docker_beacond_image" == false ]]; then
+				log_info "Building docker-beacond image: ${docker_beacond_tag}"
+				docker build -f scripts/Dockerfile.beacond.template --build-arg BEACON_KIT_TAG=${docker_beacond_tag} -t docker-beacond:${docker_beacond_tag} .
+			fi
+
+			# Test docker-bera-reth image
+			if docker run --rm docker-bera-reth:${docker_berareth_tag} bera-reth --version >/dev/null 2>&1; then
+				log_success "docker-bera-reth image runs successfully."
+			else
+				log_error "Failed to run bera-reth from docker-bera-reth:${docker_berareth_tag}."
+				exit 1
+			fi
+
+			# Test docker-beacond image
+			if docker run --rm docker-beacond:${docker_beacond_tag} beacond version >/dev/null 2>&1; then
+				log_success "docker-beacond image runs successfully."
+			else
+				log_error "Failed to run beacond from docker-beacond:${docker_beacond_tag}."
+				exit 1
+			fi
+		else
+			# Check for existing bera-reth docker image
+			bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
+			if [[ -n "$bera_reth_image" ]]; then
+				bera_reth_tag=$(echo "$bera_reth_image" | awk -F: '{print $2}')
+				log_success "Found existing bera-reth docker image: $bera_reth_image (tag: $bera_reth_tag)"
+			else
+				log_info "No bera-reth-docker image found. Downloading '${docker_tag_berareth}'..."
+				download_beranodes_docker_image --binary-to-download "${BIN_BERARETH}" --version-tag "${docker_tag_berareth}"
+			fi
+
+			# Check for existing beacond docker image
+			beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'beacond-docker' || true)
+			if [[ -n "$beacond_image" ]]; then
+				beacond_tag=$(echo "$beacond_image" | awk -F: '{print $2}')
+				log_success "Found existing beacond docker image: $beacond_image (tag: $beacond_tag)"
+			else
+				log_info "No beacond-docker image found. Downloading '${docker_tag_beacond}..."
+				download_beranodes_docker_image --binary-to-download "${BIN_BEACONKIT}" --version-tag "${docker_tag_beacond}"
+			fi
+		fi
+	fi
 
 	# =========================================================================
 	# [7] WALLET GENERATION
@@ -8087,7 +8225,10 @@ cmd_init() {
 		# Step 1: Generate base beranodes.config.json file
 		generate_base_beacond_config \
 			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}"
+			--chain-spec "${network}" \
+			--mode "${mode}" \
+			--docker-beacond-tag "${docker_beacond_tag}" \
+			--docker-berareth-tag "${docker_berareth_tag}"
 
 		# Step 2: Generates a eth-genesis.json file that is shared with all nodes
 		generate_eth_genesis_file \
@@ -8110,10 +8251,12 @@ cmd_init() {
 		# Step X: Generate beacon-kit genesis.json, configured premined deposits and deposit storage in eth-genesis.json
 		generate_beacond_genesis_file_and_premined_deposits_storage \
 			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}"
+			--chain-spec "${network}" \
+			--mode "${mode}" \
+			--docker-beacond-tag "${docker_beacond_tag}" \
+			--docker-berareth-tag "${docker_berareth_tag}"
 	fi
 }
-
 
 # =============================================================================
 # start
@@ -8281,6 +8424,32 @@ cmd_start() {
 	done
 	log_success "All ports are available"
 
+	# Docker tags
+	docker_berareth_tag=""
+	docker_beacond_tag=""
+	if [[ "${mode}" == "docker" ]]; then
+		# Get tags
+		docker_berareth_tag=$(curl -sI https://github.com/berachain/bera-reth/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+		docker_beacond_tag=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+
+		# Check for existing docker image
+		docker_berareth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-bera-reth:${docker_berareth_tag}" || true)
+		if [[ -n "$docker_berareth_image" ]]; then
+			log_success "Found existing docker-bera-reth image: docker-bera-reth:${docker_berareth_tag}"
+		else
+			log_error "docker-bera-reth:${docker_berareth_tag} image not found"
+			return 1
+		fi
+
+		docker_beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-beacond:${docker_beacond_tag}" || true)
+		if [[ -n "$docker_beacond_image" ]]; then
+			log_success "Found existing docker-beacond image: docker-beacond:${docker_beacond_tag}"
+		else
+			log_error "docker-beacond:${docker_beacond_tag} image not found"
+			return 1
+		fi
+	fi
+
 	# -------------------------------------------------------------------------
 	# [STEP 5] Network-Specific Initialization
 	# -------------------------------------------------------------------------
@@ -8300,8 +8469,24 @@ cmd_start() {
 		# - Suitable for rapid iteration and testing
 		# ---------------------------------------------------------------------
 
-		if [[ "${mode}" == "local" ]]; then
-			log_info "Starting Beranode in local mode"
+		if [[ "${mode}" == "local" ]] || [[ "${mode}" == "docker" ]]; then
+			log_info "Starting Beranode in ${mode} mode"
+
+			if [[ "${mode}" == "local" ]]; then
+				# Check if bin/beacond exists in ${config_dir}/bin and is executable
+				local beacond_binary="${beranodes_dir}/bin/beacond"
+				if [[ ! -x "${beacond_binary}" ]]; then
+					log_error "beacond binary not found or not executable at: ${beacond_binary}"
+					return 1
+				fi
+
+				# Check if bin/bera-reth exists in ${config_dir}/bin and is executable
+				local bera_reth_binary="${beranodes_dir}/bin/bera-reth"
+				if [[ ! -x "${bera_reth_binary}" ]]; then
+					log_error "bera-reth binary not found or not executable at: ${bera_reth_binary}"
+					return 1
+				fi
+			fi
 
 			# Check if logs directory has existing files and prompt user
 			local logs_dir="${beranode_dir}${BERANODES_PATH_LOGS}"
@@ -8566,7 +8751,11 @@ cmd_start() {
 				log_success "✔ Directories made"
 
 				# Init beacond node
-				${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+				if [[ "$mode" == "docker" ]]; then
+					docker run -it --rm -v ${beacond_dir}:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+				else
+					${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+				fi
 				log_success "✔ Beacond node initialized"
 
 				# - replace priv_validator_key.json
@@ -8602,6 +8791,9 @@ EOF
 
 				# - add jwt.hex
 				echo -n "${jwt}" >"${node_dir}/beacond/config/jwt.hex"
+				if [[ "${mode}" == "docker" ]]; then
+					echo -n "${jwt}" >"${node_dir}/bera-reth/jwt.hex"
+				fi
 				log_success "✔ jwt.hex added"
 
 				# - update client.toml
@@ -8682,8 +8874,12 @@ EOF
 				sed "${SED_OPT[@]}" "s|^rpc-startup-check-interval = \".*\"|rpc-startup-check-interval = \"${apptoml_beacon_kit_engine_rpc_startup_check_interval}\"|" "${node_dir}/beacond/config/app.toml"
 				# rpc-jwt-refresh-interval
 				sed "${SED_OPT[@]}" "s|^rpc-jwt-refresh-interval = \".*\"|rpc-jwt-refresh-interval = \"${apptoml_beacon_kit_engine_rpc_jwt_refresh_interval}\"|" "${node_dir}/beacond/config/app.toml"
-				# jwt-secret-path
-				sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"${node_dir}/beacond/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				# jwt-secret
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"/tmp/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^jwt-secret-path = \".*\"|jwt-secret-path = \"${node_dir}/beacond/config/jwt.hex\"|" "${node_dir}/beacond/config/app.toml"
+				fi
 				# [beacon-kit-logger]
 				# time-format
 				sed "${SED_OPT[@]}" "s|^time-format = \".*\"|time-format = \"${apptoml_beacon_kit_logger_time_format}\"|" "${node_dir}/beacond/config/app.toml"
@@ -8693,7 +8889,12 @@ EOF
 				sed "${SED_OPT[@]}" "s|^log-style = \".*\"|log-style = \"${apptoml_beacon_kit_logger_style}\"|" "${node_dir}/beacond/config/app.toml"
 				# [beacon-kit-kzg]
 				# trusted-setup-path
-				sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"${beranodes_dir}/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					cp ${beranodes_dir}/tmp/kzg-trusted-setup.json ${node_dir}/beacond/kzg-trusted-setup.json
+					sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^trusted-setup-path = \".*\"|trusted-setup-path = \"${beranodes_dir}/tmp/kzg-trusted-setup.json\"|" "${node_dir}/beacond/config/app.toml"
+				fi
 				# kzg-implementation
 				sed "${SED_OPT[@]}" "s|^implementation = \".*\"|implementation = \"${apptoml_beacon_kit_kzg_implementation}\"|" "${node_dir}/beacond/config/app.toml"
 				# [beacon-kit-payload-builder]
@@ -8737,15 +8938,31 @@ EOF
 				# log_format
 				sed "${SED_OPT[@]}" "s|^log_format = \".*\"|log_format = \"${configtoml_log_format}\"|" "${node_dir}/beacond/config/config.toml"
 				# genesis_file
-				sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"${node_dir}/beacond/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"/tmp/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^genesis_file = \".*\"|genesis_file = \"${node_dir}/beacond/config/genesis.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_key_file
-				sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"${node_dir}/beacond/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"/tmp/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^priv_validator_key_file = \".*\"|priv_validator_key_file = \"${node_dir}/beacond/config/priv_validator_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_state_file
-				sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"${node_dir}/beacond/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"/tmp/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^priv_validator_state_file = \".*\"|priv_validator_state_file = \"${node_dir}/beacond/data/priv_validator_state.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# priv_validator_laddr
 				sed "${SED_OPT[@]}" "s|^priv_validator_laddr = \".*\"|priv_validator_laddr = \"${configtoml_priv_validator_laddr}\"|" "${node_dir}/beacond/config/config.toml"
 				# node_key_file
-				sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"${node_dir}/beacond/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"/tmp/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^node_key_file = \".*\"|node_key_file = \"${node_dir}/beacond/config/node_key.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# abci
 				sed "${SED_OPT[@]}" "s|^abci = \".*\"|abci = \"${configtoml_abci}\"|" "${node_dir}/beacond/config/config.toml"
 				# filter_peers
@@ -8797,8 +9014,10 @@ EOF
 				# max_header_bytes
 				sed "${SED_OPT[@]}" "s|^max_header_bytes = .*|max_header_bytes = \"${configtoml_rpc_max_header_bytes}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_cert_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^tls_cert_file = \".*\"|tls_cert_file = \"${configtoml_rpc_tls_cert_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# tls_key_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^tls_key_file = \".*\"|tls_key_file = \"${configtoml_rpc_tls_key_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# pprof_laddr
 				sed "${SED_OPT[@]}" "s|^pprof_laddr = \".*\"|pprof_laddr = \"${configtoml_rpc_pprof_laddr}\"|" "${node_dir}/beacond/config/config.toml"
@@ -8825,38 +9044,43 @@ EOF
 				sed "${SED_OPT[@]}" "256s|^laddr = \".*\"|laddr = \"tcp://0.0.0.0:${ethp2p_port}\"|" "${node_dir}/beacond/config/config.toml"
 				# external_address
 				sed "${SED_OPT[@]}" "s|^external_address = \".*\"|external_address = \"${configtoml_p2p_external_address}\"|" "${node_dir}/beacond/config/config.toml"
-
 				# Adjust seeds and peers to exclude the current node for connections
-				read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[$node_index]}")
-				read -a node_p2p_ports < <(array_exclude_element p2p_ports[@] "${p2p_ports[$node_index]}")
-				configtoml_p2p_seeds="$(
-					out=()
-					for i in "${!node_seeds[@]}"; do
-						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
+				if [[ ${#seeds[@]} -gt 1 ]]; then
+					read -a node_seeds < <(array_exclude_element seeds[@] "${seeds[$node_index]}")
+					read -a node_p2p_ports < <(array_exclude_element p2p_ports[@] "${p2p_ports[$node_index]}")
+					configtoml_p2p_seeds="$(
+						out=()
+						for i in "${!node_seeds[@]}"; do
+							out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					read -a node_peers < <(array_exclude_element peers[@] "${peers[$node_index]}")
+					configtoml_p2p_persistent_peers="$(
+						out=()
+						for i in "${!node_seeds[@]}"; do
+							out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					# seeds
+					sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
+					# persistent_peers
+					sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 
-				read -a node_peers < <(array_exclude_element peers[@] "${peers[$node_index]}")
-				configtoml_p2p_persistent_peers="$(
-					out=()
-					for i in "${!node_seeds[@]}"; do
-						out+=("${node_seeds[$i]}@localhost:${node_p2p_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
-				# seeds
-				sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
-				# persistent_peers
-				sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				# addr_book_file
-				sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				if [[ "${mode}" == "docker" ]]; then
+					sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"/tmp/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				else
+					sed "${SED_OPT[@]}" "s|^addr_book_file = \".*\"|addr_book_file = \"${node_dir}/beacond/config/addrbook.json\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 				# addr_book_strict
 				sed "${SED_OPT[@]}" "s|^addr_book_strict = .*|addr_book_strict = \"${configtoml_p2p_addr_book_strict}\"|" "${node_dir}/beacond/config/config.toml"
 				# max_num_inbound_peers
@@ -8932,6 +9156,7 @@ EOF
 				sed "${SED_OPT[@]}" "442s|^version = .*|version = \"${configtoml_blocksync_version}\"|" "${node_dir}/beacond/config/config.toml"
 				# [consensus]
 				# wal_file
+				# TODO: refactor docker compose
 				sed "${SED_OPT[@]}" "s|^wal_file = \".*\"|wal_file = \"${configtoml_consensus_wal_file}\"|" "${node_dir}/beacond/config/config.toml"
 				# timeout_propose
 				sed "${SED_OPT[@]}" "s|^timeout_propose = \".*\"|timeout_propose = \"${configtoml_consensus_timeout_propose}\"|" "${node_dir}/beacond/config/config.toml"
@@ -8998,9 +9223,13 @@ EOF
 
 				# Init bera-reth node
 				cp "${beranodes_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" "${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}"
-				${bin_bera_reth} init \
-					--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
-					--datadir="${bera_reth_dir}" >/dev/null 2>&1
+				if [[ "${mode}" == "docker" ]]; then
+					docker run -it --rm -v ${bera_reth_dir}:/tmp docker-bera-reth:${docker_berareth_tag} bera-reth init --chain=/tmp/${GENESIS_ETH_NAME_DEFAULT} --datadir=/tmp >/dev/null 2>&1
+				else
+					${bin_bera_reth} init \
+						--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
+						--datadir="${bera_reth_dir}" >/dev/null 2>&1
+				fi
 				# remove existing discovery-secret
 				if [ -f "${bera_reth_dir}/discovery-secret" ]; then
 					rm -f "${bera_reth_dir}/discovery-secret"
@@ -9010,7 +9239,7 @@ EOF
 
 			# Start the nodes and record their pids
 			print_header "Starting nodes"
-      local nodes=$(jq -r '.nodes' "${config_json_path}")
+			local nodes=$(jq -r '.nodes' "${config_json_path}")
 			for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
 				echo "--------------------------------"
 				echo "Starting node $node_index"
@@ -9019,7 +9248,7 @@ EOF
 				# beacond
 				local node_json=$(echo "${nodes}" | jq -r ".[$node_index]")
 				local moniker=$(echo "${node_json}" | jq -r '.moniker')
-        local role=$(echo "${node_json}" | jq -r '.role')
+				local role=$(echo "${node_json}" | jq -r '.role')
 				local node_dir="${beranode_dir}${BERANODES_PATH_NODES}/${node_index}-${role}"
 				local beacond_dir="${node_dir}/beacond"
 				local bera_reth_dir="${node_dir}/bera-reth"
@@ -9030,8 +9259,14 @@ EOF
 				if [[ "${role}" == "validator" ]]; then
 					role_short="val"
 				fi
-				${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
-				echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+				if [[ "${mode}" == "docker" ]]; then
+					# TODO: refactor docker compose
+					docker run -it -d -v ${beacond_dir}:/tmp --name ${node_index}-${role_short}-${base_moniker}-beacond docker-beacond:${docker_beacond_tag} beacond start --home /tmp >/dev/null 2>&1
+					#  &>/logs/${node_index}-${role_short}-${base_moniker}-beacond.log &
+				else
+					${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
+					echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+				fi
 				log_success "✔ Beacond node started"
 
 				# bera-reth
@@ -9045,67 +9280,97 @@ EOF
 				local configtoml_grpc_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_laddr')
 				local configtoml_grpc_privileged_laddr=$(echo "${node_json}" | jq -r '.configtoml_grpc_privileged_laddr')
 
-				read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
-				read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
-				read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
+				configtoml_berareth_bootnodes=""
+				configtoml_berareth_trusted_peers=""
+				if [[ ${#berareth_bootnodes[@]} -gt 1 ]]; then
+					read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
+					read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
+					read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
 
-				configtoml_berareth_bootnodes="$(
-					out=()
-					for i in "${!bootnodes[@]}"; do
-						out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
-				configtoml_berareth_trusted_peers="$(
-					out=()
-					for i in "${!trusted_peers[@]}"; do
-						out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
-					done
-					(
-						IFS=,
-						echo "${out[*]}"
-					)
-				)"
+					configtoml_berareth_bootnodes="$(
+						out=()
+						for i in "${!bootnodes[@]}"; do
+							out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+					configtoml_berareth_trusted_peers="$(
+						out=()
+						for i in "${!trusted_peers[@]}"; do
+							out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
+						done
+						(
+							IFS=,
+							echo "${out[*]}"
+						)
+					)"
+				fi
 
 				private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
 				public_key=$(echo "${node_json}" | jq -r '.berareth_config.public_key')
 
 				# Add discovery secret - enode bera-reth id
 				echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret"
-				${bin_bera_reth} node \
-					$( [[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}" ) \
-					$( [[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}" ) \
-					--authrpc.addr="127.0.0.1" \
-					--authrpc.port="${el_authrpc_port}" \
-					--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
-					--chain="${bera_reth_dir}/eth-genesis.json" \
-					--datadir="${bera_reth_dir}" \
-					--discovery.port="${el_eth_port}" \
-					--engine.persistence-threshold=0 \
-					--engine.memory-block-buffer-target=0 \
-					--http \
-					--nat="extip:127.0.0.1" \
-					--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
-					--http.addr=0.0.0.0 \
-					--http.port="${el_ethrpc_port}" \
-					--http.corsdomain="*" \
-					--port="${el_eth_port}" \
-					--ws \
-					--ws.addr=0.0.0.0 \
-					--ws.port="${el_ws_port}" \
-					--ws.origins="*" \
-					&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
-				local pid=$!
-				echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+				if [[ "${mode}" == "docker" ]]; then
+					# TODO: refactor docker compose
+					docker run -it -d -v ${bera_reth_dir}:/tmp --name ${node_index}-${role_short}-${base_moniker}-bera-reth docker-bera-reth:${docker_berareth_tag} bera-reth node \
+						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
+						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
+						--authrpc.addr="127.0.0.1" \
+						--authrpc.port="${el_authrpc_port}" \
+						--authrpc.jwtsecret="/tmp/jwt.hex" \
+						--chain="/tmp/eth-genesis.json" \
+						--datadir="/tmp" \
+						--discovery.port="${el_eth_port}" \
+						--engine.persistence-threshold=0 \
+						--engine.memory-block-buffer-target=0 \
+						--http --nat="extip:127.0.0.1" \
+						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
+						--http.addr=0.0.0.0 \
+						--http.port="${el_ethrpc_port}" \
+						--http.corsdomain="*" \
+						--port="${el_eth_port}" \
+						--ws \
+						--ws.addr=0.0.0.0 \
+						--ws.port="${el_ws_port}" \
+						--ws.origins="*"
+					# &>/logs/${node_index}-${role_short}-${base_moniker}-berareth.log &
+				else
+					${bin_bera_reth} node \
+						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
+						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
+						--authrpc.addr="127.0.0.1" \
+						--authrpc.port="${el_authrpc_port}" \
+						--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
+						--chain="${bera_reth_dir}/eth-genesis.json" \
+						--datadir="${bera_reth_dir}" \
+						--discovery.port="${el_eth_port}" \
+						--engine.persistence-threshold=0 \
+						--engine.memory-block-buffer-target=0 \
+						--http \
+						--nat="extip:127.0.0.1" \
+						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
+						--http.addr=0.0.0.0 \
+						--http.port="${el_ethrpc_port}" \
+						--http.corsdomain="*" \
+						--port="${el_eth_port}" \
+						--ws \
+						--ws.addr=0.0.0.0 \
+						--ws.port="${el_ws_port}" \
+						--ws.origins="*" \
+						&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
+					local pid=$!
+					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+				fi
 				log_success "✔ Bera-reth node started"
 			done
-    elif [[ "$mode" == "docker" ]]; then
-      log_info "Starting Beranode in docker mode"
-      log_warn "Docker mode is not yet supported. Docker integration is coming soon."
-      return 1
+		elif [[ "$mode" == "docker" ]]; then
+			log_info "Starting Beranode in docker mode"
+			log_warn "Docker mode is not yet supported. Docker integration is coming soon."
+			return 1
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")
 			log_error "Unsupported mode: ${mode}"
@@ -9113,7 +9378,6 @@ EOF
 		fi
 	fi
 }
-
 
 # =============================================================================
 # stop
@@ -9205,7 +9469,6 @@ cmd_stop() {
 
 	log_success "Stopped ${#pid_files[@]} nodes"
 }
-
 
 # =============================================================================
 # validate
@@ -9327,7 +9590,6 @@ EOF
 # Note: Standalone execution code removed to prevent conflicts when built into beranode.
 # When running standalone for testing, call cmd_validate directly:
 #   source this_file.sh && cmd_validate "$@"
-
 
 # =============================================================================
 # dispatcher
@@ -9519,7 +9781,6 @@ main() {
 		;;
 	esac
 }
-
 
 # =============================================================================
 # Entry Point - Main script execution

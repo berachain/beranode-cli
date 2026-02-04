@@ -348,23 +348,23 @@ cmd_init() {
 	fi
 	log_success "Cast version is supported."
 
-  # Check curl version
-  check_curl_version
-  if [[ $? -ne 0 ]]; then
-    log_error "Curl version is not supported. Please upgrade to version $SUPPORTED_CURL_VERSION or higher."
-    return 1
-  fi
-  log_success "Curl version is supported."
+	# Check curl version
+	check_curl_version
+	if [[ $? -ne 0 ]]; then
+		log_error "Curl version is not supported. Please upgrade to version $SUPPORTED_CURL_VERSION or higher."
+		return 1
+	fi
+	log_success "Curl version is supported."
 
 	print_header "Initializing Berachain Node"
 
-  # Check for .tar.gz installed locally
-  check_tar_gz_version
-  if [[ $? -ne 0 ]]; then
-    log_error "Tar.gz version is not supported. Please upgrade to version $SUPPORTED_TAR_GZ_VERSION or higher."
-    return 1
-  fi
-  log_success "Tar.gz version is supported."
+	# Check for .tar.gz installed locally
+	check_tar_gz_version
+	if [[ $? -ne 0 ]]; then
+		log_error "Tar.gz version is not supported. Please upgrade to version $SUPPORTED_TAR_GZ_VERSION or higher."
+		return 1
+	fi
+	log_success "Tar.gz version is supported."
 
 	# =========================================================================
 	# [2] VARIABLE INITIALIZATION
@@ -382,14 +382,14 @@ cmd_init() {
 	local full_nodes=0
 	local pruned_nodes=0
 	local docker_mode=false
-  local docker_tag_beacond="latest"
-  local docker_tag_berareth="latest"
+	local docker_tag_beacond="latest"
+	local docker_tag_berareth="latest"
 	local mode="local"
 	local wallet_private_key=""
 	local wallet_address=""
 	local wallet_balance=${DEFAULT_WALLET_BALANCE}
-  local beacond_version="latest"
-  local berareth_version="latest"
+	local beacond_version="latest"
+	local berareth_version="latest"
 
 	# Client.toml configuration variables
 	local clienttoml_chain_id="${CLIENTTOML_CHAIN_ID}"
@@ -609,38 +609,38 @@ cmd_init() {
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
-    --beacond-version)
-      if [[ -n "$2" ]]; then
-        check_beacond_version="$2"
-        if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
-          log_warn "defaulting to ${beacond_version}..."
-        else
-          beacond_version="$check_beacond_version"
-        fi
-        log_info "Using beacond version: $beacond_version"
-        shift 2
-      else
-        log_warn "--beacond-version is not set. defaulting to ${beacond_version}"
-        shift
-      fi
-      ;;
-    --berareth-version)
-      if [[ -n "$2" ]]; then
-        check_berareth_version="$2"
-        if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-          log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
-          log_warn "defaulting to ${berareth_version}..."
-        else
-          berareth_version="$check_berareth_version"
-        fi
-        log_info "Using berareth version: $berareth_version"
-        shift 2
-      else
-        log_warn "--berareth-version is not set. defaulting to ${berareth_version}"
-        shift
-      fi
-      ;;
+		--beacond-version)
+			if [[ -n "$2" ]]; then
+				check_beacond_version="$2"
+				if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+					log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					log_warn "defaulting to ${beacond_version}..."
+				else
+					beacond_version="$check_beacond_version"
+				fi
+				log_info "Using beacond version: $beacond_version"
+				shift 2
+			else
+				log_warn "--beacond-version is not set. defaulting to ${beacond_version}"
+				shift
+			fi
+			;;
+		--berareth-version)
+			if [[ -n "$2" ]]; then
+				check_berareth_version="$2"
+				if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+					log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					log_warn "defaulting to ${berareth_version}..."
+				else
+					berareth_version="$check_berareth_version"
+				fi
+				log_info "Using berareth version: $berareth_version"
+				shift 2
+			else
+				log_warn "--berareth-version is not set. defaulting to ${berareth_version}"
+				shift
+			fi
+			;;
 		--beranodes-dir)
 			BERANODES_PATH=$(parse_beranodes_dir "$2")
 			shift 2
@@ -649,13 +649,13 @@ cmd_init() {
 			docker_mode=true
 			mode="docker"
 			# Check if Docker is installed
-			if ! command -v docker &> /dev/null; then
+			if ! command -v docker &>/dev/null; then
 				log_error "Docker is not installed or not found in PATH. Please install Docker to continue."
 				exit 1
 			fi
 
 			# Check if Docker daemon is running
-			if ! docker info &> /dev/null; then
+			if ! docker info &>/dev/null; then
 				log_error "Docker daemon is not running. Please start Docker to continue."
 				exit 1
 			fi
@@ -670,7 +670,7 @@ cmd_init() {
 					docker_minor="${BASH_REMATCH[2]}"
 					docker_patch="${BASH_REMATCH[3]}"
 					# Compare version (minimum required: 20.10.0)
-					if (( docker_major < 20 )) || { (( docker_major == 20 )) && (( docker_minor < 10 )); }; then
+					if ((docker_major < 20)) || { ((docker_major == 20)) && ((docker_minor < 10)); }; then
 						log_error "Docker version 20.10.0 or newer is required. Current version: $docker_version"
 						exit 1
 					fi
@@ -680,24 +680,24 @@ cmd_init() {
 			fi
 			shift
 			;;
-    --docker-tag-berareth)
-      if [[ -n "$2" ]]; then
-        docker_tag_berareth="$2"
-        shift 2
-      else
-        log_warn "--docker-tag-berareth is not set. defaulting to latest"
-        docker_tag_berareth="latest"
-      fi
-      ;;
-    --docker-tag-beacond)
-      if [[ -n "$2" ]]; then
-        docker_tag_beacond="$2"
-        shift 2
-      else
-        log_warn "--docker-tag-beacond is not set. defaulting to latest"
-        docker_tag_beacond="latest"
-      fi
-      ;;
+		--docker-tag-berareth)
+			if [[ -n "$2" ]]; then
+				docker_tag_berareth="$2"
+				shift 2
+			else
+				log_warn "--docker-tag-berareth is not set. defaulting to latest"
+				docker_tag_berareth="latest"
+			fi
+			;;
+		--docker-tag-beacond)
+			if [[ -n "$2" ]]; then
+				docker_tag_beacond="$2"
+				shift 2
+			else
+				log_warn "--docker-tag-beacond is not set. defaulting to latest"
+				docker_tag_beacond="latest"
+			fi
+			;;
 		--moniker)
 			if [[ -n "$2" ]]; then
 				moniker="$2"
@@ -2301,82 +2301,144 @@ cmd_init() {
 	# [6] BINARY VERIFICATION
 	# =========================================================================
 	# Verify beacond and bera-reth binaries exist and are executable
-  if { [[ "$mode" == "local" ]] || [[ "$mode" == "docker" ]]; } && [[ "$IS_MACOS" == "true" ]]; then
-    if [[ "$mode" == "docker" ]]; then
-      log_warn "${YELLOW}Normal docker mode on MacOS is not supported. Continuing with build from source approach.${RESET}"
-    fi
+	if [[ "$mode" == "local" ]]; then
+		missing_binaries=0
+		# - beacond
+		is_beacond_installed=false
+		if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
+			log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
+		else
+			# Check if 'beacond version' command executes successfully
+			beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
+			if [[ $? -eq 0 ]]; then
+				log_success "'${BIN_BEACONKIT} version' works as expected."
+				log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
+				is_beacond_installed=true
+			else
+				log_error "'${BIN_BEACONKIT} version' did not work as expected."
+			fi
+		fi
 
-    missing_binaries=0
-    # - beacond
-    is_beacond_installed=false
-    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" ]]; then
-      log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
-    else
-      # Check if 'beacond version' command executes successfully
-      beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
-      if [[ $? -eq 0 ]]; then
-        log_success "'${BIN_BEACONKIT} version' works as expected."
-        log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
-        is_beacond_installed=true
-      else
-        log_error "'${BIN_BEACONKIT} version' did not work as expected."
-      fi
-    fi
+		if [[ "$is_beacond_installed" == false ]]; then
+			log_info "Installing beacond binary..."
+			download_beranodes_binary \
+				--config-dir "${BERANODES_PATH}" \
+				--binary-to-download "${BIN_BEACONKIT}" \
+				--version-tag "latest"
+		fi
 
-    if [[ "$is_beacond_installed" == false ]]; then
-      log_info "Installing beacond binary..."
-      download_beranodes_binary \
-        --config-dir "${BERANODES_PATH}" \
-        --binary-to-download "${BIN_BEACONKIT}" \
-        --version-tag "latest"
-    fi
+		# - berareth
+		is_berareth_installed=false
+		if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
+			log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
+			missing_binaries=1
+		else
+			# Check if 'berareth version' command executes successfully
+			bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
+			if [[ $? -eq 0 ]]; then
+				log_success "'${BIN_BERARETH} --version' works as expected."
+				log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
+				is_berareth_installed=true
+			else
+				log_error "'${BIN_BERARETH} --version' did not work as expected."
+			fi
+		fi
 
-    # - berareth
-    is_berareth_installed=false
-    if [[ ! -x "${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" ]]; then
-      log_warn "Binary '${BIN_BERARETH}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}"
-      missing_binaries=1
-    else
-      # Check if 'berareth version' command executes successfully
-      bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
-      if [[ $? -eq 0 ]]; then
-        log_success "'${BIN_BERARETH} --version' works as expected."
-        log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
-        is_berareth_installed=true
-      else
-        log_error "'${BIN_BERARETH} --version' did not work as expected."
-      fi
-    fi
+		if [[ "$is_berareth_installed" == false ]]; then
+			log_info "Installing bera-reth binary..."
+			download_beranodes_binary \
+				--config-dir "${BERANODES_PATH}" \
+				--binary-to-download "${BIN_BERARETH}" \
+				--version-tag "latest"
+		fi
+	# Mode meant for linux only
+	elif [[ "$mode" == "docker" ]]; then
+		if [[ "$IS_MACOS" == "true" ]]; then
+			log_warn "${YELLOW}Normal docker mode on MacOS is not supported. Continuing with build from source approach.${RESET}"
+			# Prompt user for confirmation before proceeding with building docker containers from source
+			echo -e "${YELLOW}==========================================${RESET}"
+			echo -e "${YELLOW}Are you sure you want to continue?${RESET}"
+			echo -e "${YELLOW}This will add a few minutes to build the docker containers from source.${RESET}"
+			echo -e "${YELLOW}==========================================${RESET}"
+			read -p "Continue? (y/n): " confirm_build
+			case "$confirm_build" in
+			y | Y | yes | Yes | YES)
+				log_info "Proceeding with build from source..."
+				;;
+			*)
+				log_warn "Initialization aborted by user."
+				exit 1
+				;;
+			esac
 
-    if [[ "$is_berareth_installed" == false ]]; then
-      log_info "Installing bera-reth binary..."
-      download_beranodes_binary \
-        --config-dir "${BERANODES_PATH}" \
-        --binary-to-download "${BIN_BERARETH}" \
-        --version-tag "latest"
-    fi
-  # Mode meant for linux only
-  elif [[ "$mode" == "docker" ]]; then
-    # Check for existing bera-reth docker image
-    bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
-    if [[ -n "$bera_reth_image" ]]; then
-      bera_reth_tag=$(echo "$bera_reth_image" | awk -F: '{print $2}')
-      log_success "Found existing bera-reth docker image: $bera_reth_image (tag: $bera_reth_tag)"
-    else
-      log_info "No bera-reth-docker image found. Downloading '${docker_tag_berareth}'..."
-      download_beranodes_docker_image --binary-to-download "${BIN_BERARETH}" --version-tag "${docker_tag_berareth}"
-    fi
+			# Get tags
+			docker_berareth_tag=$(curl -sI https://github.com/berachain/bera-reth/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
+			docker_beacond_tag=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n')
 
-    # Check for existing beacond docker image
-    beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'beacond-docker' || true)
-    if [[ -n "$beacond_image" ]]; then
-      beacond_tag=$(echo "$beacond_image" | awk -F: '{print $2}')
-      log_success "Found existing beacond docker image: $beacond_image (tag: $beacond_tag)"
-    else
-      log_info "No beacond-docker image found. Downloading '${docker_tag_beacond}..."
-      download_beranodes_docker_image --binary-to-download "${BIN_BEACONKIT}" --version-tag "${docker_tag_beacond}"
-    fi
-  fi
+			# Check for existing docker image
+			has_docker_berareth_image=false
+			has_docker_beacond_image=false
+
+			docker_berareth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-bera-reth:${docker_berareth_tag}" || true)
+			if [[ -n "$docker_berareth_image" ]]; then
+				has_docker_berareth_image=true
+				log_success "Found existing docker-bera-reth image: docker-bera-reth:${docker_berareth_tag}"
+			fi
+			docker_beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep "docker-beacond:${docker_beacond_tag}" || true)
+			if [[ -n "$docker_beacond_image" ]]; then
+				has_docker_beacond_image=true
+				log_success "Found existing docker-beacond image: docker-beacond:${docker_beacond_tag}"
+			fi
+
+			# Build docker images if they don't exist
+			# - bera-reth
+			if [[ "$has_docker_berareth_image" == false ]]; then
+				log_info "Building docker-bera-reth image: ${docker_berareth_tag}"
+				docker build -f scripts/Dockerfile.berareth.template --build-arg BERA_RETH_TAG=${docker_berareth_tag} -t docker-bera-reth:${docker_berareth_tag} .
+			fi
+			# - beacond
+			if [[ "$has_docker_beacond_image" == false ]]; then
+				log_info "Building docker-beacond image: ${docker_beacond_tag}"
+				docker build -f scripts/Dockerfile.beacond.template --build-arg BEACON_KIT_TAG=${docker_beacond_tag} -t docker-beacond:${docker_beacond_tag} .
+			fi
+
+			# Test docker-bera-reth image
+			if docker run --rm docker-bera-reth:${docker_berareth_tag} bera-reth --version >/dev/null 2>&1; then
+				log_success "docker-bera-reth image runs successfully."
+			else
+				log_error "Failed to run bera-reth from docker-bera-reth:${docker_berareth_tag}."
+				exit 1
+			fi
+
+			# Test docker-beacond image
+			if docker run --rm docker-beacond:${docker_beacond_tag} beacond version >/dev/null 2>&1; then
+				log_success "docker-beacond image runs successfully."
+			else
+				log_error "Failed to run beacond from docker-beacond:${docker_beacond_tag}."
+				exit 1
+			fi
+		else
+			# Check for existing bera-reth docker image
+			bera_reth_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'bera-reth-docker' || true)
+			if [[ -n "$bera_reth_image" ]]; then
+				bera_reth_tag=$(echo "$bera_reth_image" | awk -F: '{print $2}')
+				log_success "Found existing bera-reth docker image: $bera_reth_image (tag: $bera_reth_tag)"
+			else
+				log_info "No bera-reth-docker image found. Downloading '${docker_tag_berareth}'..."
+				download_beranodes_docker_image --binary-to-download "${BIN_BERARETH}" --version-tag "${docker_tag_berareth}"
+			fi
+
+			# Check for existing beacond docker image
+			beacond_image=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep 'beacond-docker' || true)
+			if [[ -n "$beacond_image" ]]; then
+				beacond_tag=$(echo "$beacond_image" | awk -F: '{print $2}')
+				log_success "Found existing beacond docker image: $beacond_image (tag: $beacond_tag)"
+			else
+				log_info "No beacond-docker image found. Downloading '${docker_tag_beacond}..."
+				download_beranodes_docker_image --binary-to-download "${BIN_BEACONKIT}" --version-tag "${docker_tag_beacond}"
+			fi
+		fi
+	fi
 
 	# =========================================================================
 	# [7] WALLET GENERATION
@@ -2932,7 +2994,10 @@ cmd_init() {
 		# Step 1: Generate base beranodes.config.json file
 		generate_base_beacond_config \
 			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}"
+			--chain-spec "${network}" \
+			--mode "${mode}" \
+			--docker-beacond-tag "${docker_beacond_tag}" \
+			--docker-berareth-tag "${docker_berareth_tag}"
 
 		# Step 2: Generates a eth-genesis.json file that is shared with all nodes
 		generate_eth_genesis_file \
@@ -2955,6 +3020,9 @@ cmd_init() {
 		# Step X: Generate beacon-kit genesis.json, configured premined deposits and deposit storage in eth-genesis.json
 		generate_beacond_genesis_file_and_premined_deposits_storage \
 			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}"
+			--chain-spec "${network}" \
+			--mode "${mode}" \
+			--docker-beacond-tag "${docker_beacond_tag}" \
+			--docker-berareth-tag "${docker_berareth_tag}"
 	fi
 }

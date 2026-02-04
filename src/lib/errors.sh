@@ -28,23 +28,23 @@ set -euo pipefail
 #   echo "Downloaded: $output"
 ################################################################################
 run_or_fail() {
-    local cmd="$1"
-    local error_msg="${2:-Command failed}"
-    local output
-    local exit_code=0
+	local cmd="$1"
+	local error_msg="${2:-Command failed}"
+	local output
+	local exit_code=0
 
-    # Execute command and capture both stdout and stderr
-    if ! output=$(eval "$cmd" 2>&1); then
-        exit_code=$?
-        log_error "$error_msg"
-        log_error "Command: $cmd"
-        log_error "Output: $output"
-        log_error "Exit code: $exit_code"
-        return 1
-    fi
+	# Execute command and capture both stdout and stderr
+	if ! output=$(eval "$cmd" 2>&1); then
+		exit_code=$?
+		log_error "$error_msg"
+		log_error "Command: $cmd"
+		log_error "Output: $output"
+		log_error "Exit code: $exit_code"
+		return 1
+	fi
 
-    echo "$output"
-    return 0
+	echo "$output"
+	return 0
 }
 
 ################################################################################
@@ -63,15 +63,15 @@ run_or_fail() {
 #   assert_success "[ -f /path/to/file ]" "Required file not found"
 ################################################################################
 assert_success() {
-    local cmd="$1"
-    local error_msg="${2:-Assertion failed}"
+	local cmd="$1"
+	local error_msg="${2:-Assertion failed}"
 
-    if ! eval "$cmd" >/dev/null 2>&1; then
-        log_error "$error_msg"
-        log_error "Command: $cmd"
-        return 1
-    fi
-    return 0
+	if ! eval "$cmd" >/dev/null 2>&1; then
+		log_error "$error_msg"
+		log_error "Command: $cmd"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -90,14 +90,14 @@ assert_success() {
 #   assert_file_exists "/etc/config.json" "Config file not found"
 ################################################################################
 assert_file_exists() {
-    local file_path="$1"
-    local error_msg="${2:-File not found: $file_path}"
+	local file_path="$1"
+	local error_msg="${2:-File not found: $file_path}"
 
-    if [[ ! -f "$file_path" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ ! -f "$file_path" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -116,14 +116,14 @@ assert_file_exists() {
 #   assert_dir_exists "/var/lib/beranode" "Node directory not found"
 ################################################################################
 assert_dir_exists() {
-    local dir_path="$1"
-    local error_msg="${2:-Directory not found: $dir_path}"
+	local dir_path="$1"
+	local error_msg="${2:-Directory not found: $dir_path}"
 
-    if [[ ! -d "$dir_path" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ ! -d "$dir_path" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -143,15 +143,15 @@ assert_dir_exists() {
 #   assert_not_empty "$api_key" "API_KEY" "API key is required"
 ################################################################################
 assert_not_empty() {
-    local value="$1"
-    local var_name="$2"
-    local error_msg="${3:-Variable is empty: $var_name}"
+	local value="$1"
+	local var_name="$2"
+	local error_msg="${3:-Variable is empty: $var_name}"
 
-    if [[ -z "$value" ]]; then
-        log_error "$error_msg"
-        return 1
-    fi
-    return 0
+	if [[ -z "$value" ]]; then
+		log_error "$error_msg"
+		return 1
+	fi
+	return 0
 }
 
 ################################################################################
@@ -171,29 +171,29 @@ assert_not_empty() {
 #   run_with_retry "curl -sL https://api.example.com" 5 10
 ################################################################################
 run_with_retry() {
-    local cmd="$1"
-    local max_retries="${2:-3}"
-    local retry_delay="${3:-5}"
-    local attempt=1
-    local exit_code=0
+	local cmd="$1"
+	local max_retries="${2:-3}"
+	local retry_delay="${3:-5}"
+	local attempt=1
+	local exit_code=0
 
-    while (( attempt <= max_retries )); do
-        if eval "$cmd" >/dev/null 2>&1; then
-            return 0
-        fi
-        exit_code=$?
+	while ((attempt <= max_retries)); do
+		if eval "$cmd" >/dev/null 2>&1; then
+			return 0
+		fi
+		exit_code=$?
 
-        if (( attempt < max_retries )); then
-            log_warn "Command failed (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
-            sleep "$retry_delay"
-        fi
+		if ((attempt < max_retries)); then
+			log_warn "Command failed (attempt $attempt/$max_retries), retrying in ${retry_delay}s..."
+			sleep "$retry_delay"
+		fi
 
-        ((attempt++))
-    done
+		((attempt++))
+	done
 
-    log_error "Command failed after $max_retries attempts"
-    log_error "Command: $cmd"
-    return $exit_code
+	log_error "Command failed after $max_retries attempts"
+	log_error "Command: $cmd"
+	return $exit_code
 }
 
 ################################################################################
@@ -212,12 +212,12 @@ run_with_retry() {
 #   exit_on_error $? "Critical failure: unable to proceed"
 ################################################################################
 exit_on_error() {
-    local exit_code="$1"
-    local error_msg="$2"
+	local exit_code="$1"
+	local error_msg="$2"
 
-    if [[ "$exit_code" -ne 0 ]]; then
-        log_error "$error_msg"
-        log_error "Exiting with code: $exit_code"
-        exit "$exit_code"
-    fi
+	if [[ "$exit_code" -ne 0 ]]; then
+		log_error "$error_msg"
+		log_error "Exiting with code: $exit_code"
+		exit "$exit_code"
+	fi
 }
