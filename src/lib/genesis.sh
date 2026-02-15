@@ -11,7 +11,7 @@
 # [3] generate_genesis_file        - Creates basic beacon chain genesis file
 # [4] generate_beacond_genesis     - Comprehensive beacon genesis with deposits
 #
-# VERSION CONTEXT (v0.7.1):
+# VERSION CONTEXT (v0.8.0):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)
@@ -1274,7 +1274,7 @@ generate_base_beacond_config() {
 
 		mkdir -p "${config_dir}/tmp/beacond"
 		if [[ "$mode" == "docker" ]]; then
-			docker run -it --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
 		else
 			${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		fi
@@ -1652,7 +1652,7 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 
 	# beacond init
 	if [[ "$mode" == "docker" ]]; then
-		docker run -it --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+		docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
 	else
 		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 	fi

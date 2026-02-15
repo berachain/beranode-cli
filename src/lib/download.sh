@@ -235,7 +235,7 @@ download_beranodes_binary() {
 			if [[ -n "$2" ]]; then
 				check_version_tag="$2"
 				if [[ ! "$check_version_tag" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-					log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.7.1, v0.7.1-rc2)"
+					log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.8.0, v0.8.0-rc2)"
 					return 1
 				fi
 				version_tag="$check_version_tag"

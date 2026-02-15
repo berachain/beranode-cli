@@ -19,6 +19,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.8.0] - 2026-02-15
+
+### Summary
+
+Full support for docker on mac os
+
+### Changed Files
+
+- beranode
+- build.sh
+- src/commands/common.sh
+- src/commands/init.sh
+- src/commands/start.sh
+- src/core/dispatcher.sh
+- src/lib/constants.sh
+- src/lib/download.sh
+- src/lib/genesis.sh
+- src/lib/logging.sh
+- src/lib/utils.sh
+- CHANGELOG.md.tmp
+- test.sh
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.7.1] - 2026-02-02
 
 ### Summary
@@ -282,7 +316,8 @@ Add version management with description support and changelog automation
 - Node management commands
 - Network configuration support
 
-[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/berachain/beranode-cli/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/berachain/beranode-cli/compare/v0.8.0...v0.7.1
 [0.6.0]: https://github.com/berachain/beranode-cli/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/berachain/beranode-cli/compare/v0.4.1...v0.5.0
