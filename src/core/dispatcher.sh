@@ -2,7 +2,7 @@
 # Command Dispatcher - Core Routing Module
 # =============================================================================
 #
-# VERSION: v0.8.0 (Current)
+# VERSION: v0.9.0 (Current)
 #
 # PURPOSE:
 #   This module serves as the central command router for the beranode CLI,
@@ -10,8 +10,8 @@
 #   managing the primary control flow of the application.
 #
 # CHANGELOG (Recent):
-#   v0.8.0 - Added --help flag support for init and start commands
-#   v0.8.0 - Implemented semantic versioning (semver) support
+#   v0.9.0 - Added --help flag support for init and start commands
+#   v0.9.0 - Implemented semantic versioning (semver) support
 #   v0.1.x - Added beacond TOML configurations
 #
 # =============================================================================
@@ -27,8 +27,8 @@
 #
 #   [3] COMMAND ROUTING TABLE
 #       - Help/Version flags       : -h, --help, -v, --version
-#       - Active commands          : init, start, validate
-#       - Placeholder commands     : stop, restart, status, logs, config, update
+#       - Active commands          : init, start, stop, status, validate
+#       - Placeholder commands     : restart, logs, config, update
 #
 # =============================================================================
 
@@ -55,6 +55,8 @@ USAGE:
 COMMANDS:
     init        Initialize a new Berachain node configuration
     start       Start the Berachain node
+    stop        Stop running Berachain nodes
+    status      Display live status of all Berachain nodes
     validate    Validate beranodes configuration file
     help        Show this help message
     version     Show version information
@@ -66,6 +68,7 @@ OPTIONS:
 EXAMPLES:
     beranode init --network devnet --validators 1
     beranode start
+    beranode status
     beranode validate
 
 For more information, visit: https://github.com/berachain/beranode-cli2
@@ -149,7 +152,7 @@ main() {
 	# ---------------------------------------------------------------------
 	# [3.1] Help and Version Flags
 	# Handles: -h, --help, help, -v, --version, version
-	# Added in: v0.8.0 with enhanced --help support
+	# Added in: v0.9.0 with enhanced --help support
 	# ---------------------------------------------------------------------
 	-h | --help | help)
 		show_help
@@ -165,25 +168,31 @@ main() {
 	init)
 		# Initialize new node configuration
 		# Handler: cmd_init() in src/commands/init.sh
-		# Added: v0.1.x, Enhanced: v0.8.0 with --help flag
+		# Added: v0.1.x, Enhanced: v0.9.0 with --help flag
 		cmd_init "$@"
 		;;
 	start)
 		# Start the Berachain node
 		# Handler: cmd_start() in src/commands/start.sh
-		# Added: v0.1.x, Enhanced: v0.8.0 with --help flag
+		# Added: v0.1.x, Enhanced: v0.9.0 with --help flag
 		cmd_start "$@"
 		;;
 	stop)
 		# Stop the Berachain node
 		# Handler: cmd_stop() in src/commands/stop.sh
-		# Added: v0.8.0 with --help flag
+		# Added: v0.9.0 with --help flag
 		cmd_stop "$@"
+		;;
+	status)
+		# Display live status of all Berachain nodes
+		# Handler: cmd_status() in src/commands/status.sh
+		# Added: v0.9.0 with --help flag
+		cmd_status "$@"
 		;;
 	validate)
 		# Validate beranodes configuration file
 		# Handler: cmd_validate() in src/commands/validate.sh
-		# Added: v0.8.0 with regex-based validation
+		# Added: v0.9.0 with regex-based validation
 		cmd_validate "$@"
 		;;
 
@@ -191,17 +200,9 @@ main() {
 	# [3.3] Placeholder Commands (Future Implementation)
 	# These commands are reserved for future versions
 	# ---------------------------------------------------------------------
-	# stop)
-	#     # Stop running node gracefully
-	#     stop_node "$@"
-	#     ;;
 	# restart)
 	#     # Restart node (stop + start)
 	#     restart_node "$@"
-	#     ;;
-	# status)
-	#     # Display current node status
-	#     show_node_status
 	#     ;;
 	# logs)
 	#     # Display and follow node logs

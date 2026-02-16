@@ -8,9 +8,9 @@ set -euo pipefail
 # commands (init, start, etc.). It serves as a central repository for command
 # utilities that are needed by more than one command module.
 #
-# VERSION CONTEXT - Beranode CLI v0.8.0:
+# VERSION CONTEXT - Beranode CLI v0.9.0:
 # ──────────────────────────────────────────────────────────────────────────────
-# In the current version (v0.8.0), this module is structured as a placeholder
+# In the current version (v0.9.0), this module is structured as a placeholder
 # for future common command functionality. As the CLI evolves and patterns
 # emerge across command modules (init.sh, start.sh, etc.), shared functions
 # will be extracted and centralized here to promote code reuse and maintainability.

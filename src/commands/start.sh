@@ -1,5 +1,5 @@
 # =============================================================================
-# Start Command - Beranode CLI v0.8.0
+# Start Command - Beranode CLI v0.9.0
 # =============================================================================
 # This module implements the 'start' command for the Beranode CLI tool.
 # It orchestrates the startup of Berachain nodes (validators, full nodes, or
@@ -18,7 +18,7 @@
 #
 # VERSION HISTORY:
 # ----------------
-# v0.8.0 - Current version
+# v0.9.0 - Current version
 #        - Added --help command support
 #        - Enhanced version management with semantic versioning
 #        - Improved error handling and validation

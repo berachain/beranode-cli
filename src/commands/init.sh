@@ -4,7 +4,7 @@ set -euo pipefail
 # BERANODE INIT COMMAND
 # =============================================================================
 # File: src/commands/init.sh
-# Version: Compatible with Beranode CLI v0.8.0
+# Version: Compatible with Beranode CLI v0.9.0
 # Description: Initializes Berachain node configurations including validator,
 #              full nodes, and pruned nodes with comprehensive configuration
 #              management for client.toml, app.toml, and config.toml files.
@@ -62,9 +62,9 @@ set -euo pipefail
 #      └─ Generate beacond genesis.json
 #
 # =============================================================================
-# RELATIONSHIP TO CURRENT VERSION (v0.8.0)
+# RELATIONSHIP TO CURRENT VERSION (v0.9.0)
 # =============================================================================
-# This init.sh file is part of the Beranode CLI v0.8.0 and works in
+# This init.sh file is part of the Beranode CLI v0.9.0 and works in
 # conjunction with:
 #
 # - src/lib/constants.sh     : Provides network constants, default ports, and
@@ -613,7 +613,7 @@ cmd_init() {
 			if [[ -n "$2" ]]; then
 				check_beacond_version="$2"
 				if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-					log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.8.0, v0.8.0-rc2)"
+					log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.9.0, v0.9.0-rc2)"
 					log_warn "defaulting to ${beacond_version}..."
 				else
 					beacond_version="$check_beacond_version"
@@ -629,7 +629,7 @@ cmd_init() {
 			if [[ -n "$2" ]]; then
 				check_berareth_version="$2"
 				if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-					log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.8.0, v0.8.0-rc2)"
+					log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.9.0, v0.9.0-rc2)"
 					log_warn "defaulting to ${berareth_version}..."
 				else
 					berareth_version="$check_berareth_version"

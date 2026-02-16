@@ -11,7 +11,7 @@
 # [3] generate_genesis_file        - Creates basic beacon chain genesis file
 # [4] generate_beacond_genesis     - Comprehensive beacon genesis with deposits
 #
-# VERSION CONTEXT (v0.8.0):
+# VERSION CONTEXT (v0.9.0):
 # - Supports Berachain devnet (chain ID 80087), testnet (80069), mainnet (80094)
 # - Implements Prague upgrade series (Prague 1-N) for Berachain-specific features
 # - Pre-deploys essential contracts (CREATE2, Multicall3, WBERA, Permit2)
