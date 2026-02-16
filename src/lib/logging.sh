@@ -2,13 +2,13 @@
 set -euo pipefail
 #
 # ╔═══════════════════════════════════════════════════════════════════════════╗
-# ║                    BERANODE CLI LOGGING MODULE v0.8.0                     ║
+# ║                    BERANODE CLI LOGGING MODULE v0.9.0                     ║
 # ╚═══════════════════════════════════════════════════════════════════════════╝
 #
 # FILE:         logging.sh
 # PURPOSE:      Provides colored logging output and formatting functions
-# SINCE:        v0.8.0
-# MODIFIED:     v0.8.0 - Enhanced formatting and documentation
+# SINCE:        v0.9.0
+# MODIFIED:     v0.9.0 - Enhanced formatting and documentation
 #
 # DESCRIPTION:
 #   This module is the central logging system for the Beranode CLI. It provides
@@ -17,7 +17,7 @@ set -euo pipefail
 #   functions support DEBUG_MODE for development troubleshooting.
 #
 # VERSION CONTEXT:
-#   In v0.8.0, this logging system is used throughout the CLI for consistent
+#   In v0.9.0, this logging system is used throughout the CLI for consistent
 #   user feedback during node initialization, configuration, startup, and
 #   runtime operations. It integrates with the help system (--help commands)
 #   and provides the primary interface for user notifications.
