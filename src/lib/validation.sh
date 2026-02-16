@@ -186,7 +186,7 @@ validate_comet_address() {
 # Returns: 0 if valid, 1 if invalid
 validate_mode() {
 	local value="$1"
-	[[ "$value" =~ ^(local|dev|testnet|mainnet)$ ]]
+	[[ "$value" =~ ^(local|docker)$ ]]
 }
 
 # Validates role (validator, full_node, pruned_node)

@@ -37,45 +37,45 @@ declare -a BERANODE_CONFIG_VALUES
 #   network=$(get_config "network")
 ################################################################################
 load_config() {
-    local config_file="$1"
+	local config_file="$1"
 
-    # Validate file exists
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
+	# Validate file exists
+	if [[ ! -f "$config_file" ]]; then
+		log_error "Config file not found: $config_file"
+		return 1
+	fi
 
-    # Validate JSON is well-formed
-    if ! jq empty "$config_file" 2>/dev/null; then
-        log_error "Invalid JSON in config file: $config_file"
-        return 1
-    fi
+	# Validate JSON is well-formed
+	if ! jq empty "$config_file" 2>/dev/null; then
+		log_error "Invalid JSON in config file: $config_file"
+		return 1
+	fi
 
-    # Clear existing config
-    BERANODE_CONFIG_KEYS=()
-    BERANODE_CONFIG_VALUES=()
+	# Clear existing config
+	BERANODE_CONFIG_KEYS=()
+	BERANODE_CONFIG_VALUES=()
 
-    # Load all scalars into parallel arrays using dot notation
-    # This single jq call replaces 80+ separate jq invocations
-    local count=0
-    while IFS='=' read -r key value; do
-        BERANODE_CONFIG_KEYS[$count]="$key"
-        BERANODE_CONFIG_VALUES[$count]="$value"
-        ((count++))
-    done < <(jq -r '
+	# Load all scalars into parallel arrays using dot notation
+	# This single jq call replaces 80+ separate jq invocations
+	local count=0
+	while IFS='=' read -r key value; do
+		BERANODE_CONFIG_KEYS[$count]="$key"
+		BERANODE_CONFIG_VALUES[$count]="$value"
+		((count++))
+	done < <(jq -r '
         [paths(scalars) as $p | {($p | join(".")): getpath($p)}]
         | add
         | to_entries[]
         | "\(.key)=\(.value)"
     ' "$config_file" 2>/dev/null)
 
-    if [[ $count -eq 0 ]]; then
-        log_error "No configuration values loaded from: $config_file"
-        return 1
-    fi
+	if [[ $count -eq 0 ]]; then
+		log_error "No configuration values loaded from: $config_file"
+		return 1
+	fi
 
-    log_info "Loaded $count configuration values from: $config_file"
-    return 0
+	log_info "Loaded $count configuration values from: $config_file"
+	return 0
 }
 
 ################################################################################
@@ -94,21 +94,21 @@ load_config() {
 #   port=$(get_config "nodes.0.ethrpc_port" "26657")
 ################################################################################
 get_config() {
-    local key="$1"
-    local default="${2:-}"
+	local key="$1"
+	local default="${2:-}"
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            echo "${BERANODE_CONFIG_VALUES[$i]}"
-            return 0
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			echo "${BERANODE_CONFIG_VALUES[$i]}"
+			return 0
+		fi
+	done
 
-    # Key not found, return default
-    echo "$default"
-    return 0
+	# Key not found, return default
+	echo "$default"
+	return 0
 }
 
 ################################################################################
@@ -126,23 +126,23 @@ get_config() {
 #   chain_id=$(get_config_required "clienttoml.chain_id") || return 1
 ################################################################################
 get_config_required() {
-    local key="$1"
-    local value
+	local key="$1"
+	local value
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            value="${BERANODE_CONFIG_VALUES[$i]}"
-            if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
-                echo "$value"
-                return 0
-            fi
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			value="${BERANODE_CONFIG_VALUES[$i]}"
+			if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
+				echo "$value"
+				return 0
+			fi
+		fi
+	done
 
-    log_error "Missing required config: $key"
-    return 1
+	log_error "Missing required config: $key"
+	return 1
 }
 
 ################################################################################
@@ -162,20 +162,20 @@ get_config_required() {
 #   fi
 ################################################################################
 has_config() {
-    local key="$1"
+	local key="$1"
 
-    # Search through keys array to find matching index
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            local value="${BERANODE_CONFIG_VALUES[$i]}"
-            if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
-                return 0
-            fi
-        fi
-    done
+	# Search through keys array to find matching index
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			local value="${BERANODE_CONFIG_VALUES[$i]}"
+			if [[ -n "$value" ]] && [[ "$value" != "null" ]]; then
+				return 0
+			fi
+		fi
+	done
 
-    return 1
+	return 1
 }
 
 ################################################################################
@@ -190,9 +190,9 @@ has_config() {
 #   load_config "/new/config.json"
 ################################################################################
 clear_config() {
-    BERANODE_CONFIG_KEYS=()
-    BERANODE_CONFIG_VALUES=()
-    return 0
+	BERANODE_CONFIG_KEYS=()
+	BERANODE_CONFIG_VALUES=()
+	return 0
 }
 
 ################################################################################
@@ -206,10 +206,10 @@ clear_config() {
 #   print_config | grep "network"
 ################################################################################
 print_config() {
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        echo "${BERANODE_CONFIG_KEYS[$i]}=${BERANODE_CONFIG_VALUES[$i]}"
-    done | sort
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		echo "${BERANODE_CONFIG_KEYS[$i]}=${BERANODE_CONFIG_VALUES[$i]}"
+	done | sort
 }
 
 ################################################################################
@@ -224,7 +224,7 @@ print_config() {
 #   echo "Loaded $count config values"
 ################################################################################
 get_config_count() {
-    echo "${#BERANODE_CONFIG_KEYS[@]}"
+	echo "${#BERANODE_CONFIG_KEYS[@]}"
 }
 
 ################################################################################
@@ -248,32 +248,32 @@ get_config_count() {
 #   port=$(get_config "node.ethrpc_port")
 ################################################################################
 load_node_config() {
-    local config_file="$1"
-    local node_index="$2"
+	local config_file="$1"
+	local node_index="$2"
 
-    # Validate file exists
-    if [[ ! -f "$config_file" ]]; then
-        log_error "Config file not found: $config_file"
-        return 1
-    fi
+	# Validate file exists
+	if [[ ! -f "$config_file" ]]; then
+		log_error "Config file not found: $config_file"
+		return 1
+	fi
 
-    # Extract node object and load into config with "node." prefix
-    local count=0
-    local base_count=${#BERANODE_CONFIG_KEYS[@]}
-    while IFS='=' read -r key value; do
-        # Prefix all keys with "node." to avoid conflicts
-        BERANODE_CONFIG_KEYS[$((base_count + count))]="node.$key"
-        BERANODE_CONFIG_VALUES[$((base_count + count))]="$value"
-        ((count++))
-    done < <(jq -r ".nodes[$node_index] | [paths(scalars) as \$p | {(\$p | join(\".\")): getpath(\$p)}] | add | to_entries[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
+	# Extract node object and load into config with "node." prefix
+	local count=0
+	local base_count=${#BERANODE_CONFIG_KEYS[@]}
+	while IFS='=' read -r key value; do
+		# Prefix all keys with "node." to avoid conflicts
+		BERANODE_CONFIG_KEYS[$((base_count + count))]="node.$key"
+		BERANODE_CONFIG_VALUES[$((base_count + count))]="$value"
+		((count++))
+	done < <(jq -r ".nodes[$node_index] | [paths(scalars) as \$p | {(\$p | join(\".\")): getpath(\$p)}] | add | to_entries[] | \"\(.key)=\(.value)\"" "$config_file" 2>/dev/null)
 
-    if [[ $count -eq 0 ]]; then
-        log_error "Node $node_index not found in config file: $config_file"
-        return 1
-    fi
+	if [[ $count -eq 0 ]]; then
+		log_error "Node $node_index not found in config file: $config_file"
+		return 1
+	fi
 
-    log_info "Loaded node $node_index configuration ($count values)"
-    return 0
+	log_info "Loaded node $node_index configuration ($count values)"
+	return 0
 }
 
 ################################################################################
@@ -292,10 +292,10 @@ load_node_config() {
 #   port=$(get_node_config "ethrpc_port" "26657")
 ################################################################################
 get_node_config() {
-    local key="$1"
-    local default="${2:-}"
+	local key="$1"
+	local default="${2:-}"
 
-    get_config "node.$key" "$default"
+	get_config "node.$key" "$default"
 }
 
 ################################################################################
@@ -314,21 +314,21 @@ get_node_config() {
 #   set_config "custom.field" "value"
 ################################################################################
 set_config() {
-    local key="$1"
-    local value="$2"
+	local key="$1"
+	local value="$2"
 
-    # Search for existing key and update, or append new key-value pair
-    local i
-    for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
-        if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
-            BERANODE_CONFIG_VALUES[$i]="$value"
-            return 0
-        fi
-    done
+	# Search for existing key and update, or append new key-value pair
+	local i
+	for i in "${!BERANODE_CONFIG_KEYS[@]}"; do
+		if [[ "${BERANODE_CONFIG_KEYS[$i]}" == "$key" ]]; then
+			BERANODE_CONFIG_VALUES[$i]="$value"
+			return 0
+		fi
+	done
 
-    # Key not found, append new entry
-    local count=${#BERANODE_CONFIG_KEYS[@]}
-    BERANODE_CONFIG_KEYS[$count]="$key"
-    BERANODE_CONFIG_VALUES[$count]="$value"
-    return 0
+	# Key not found, append new entry
+	local count=${#BERANODE_CONFIG_KEYS[@]}
+	BERANODE_CONFIG_KEYS[$count]="$key"
+	BERANODE_CONFIG_VALUES[$count]="$value"
+	return 0
 }

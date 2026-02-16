@@ -33,9 +33,9 @@ RESET='\033[0m'
 #   test_suite "Validation Functions"
 ################################################################################
 test_suite() {
-    CURRENT_SUITE="$1"
-    echo ""
-    echo -e "${BLUE}=== Test Suite: $CURRENT_SUITE ===${RESET}"
+	CURRENT_SUITE="$1"
+	echo ""
+	echo -e "${BLUE}=== Test Suite: $CURRENT_SUITE ===${RESET}"
 }
 
 ################################################################################
@@ -55,23 +55,23 @@ test_suite() {
 #   assert_equals "expected" "actual" "Values should match"
 ################################################################################
 assert_equals() {
-    local expected="$1"
-    local actual="$2"
-    local message="${3:-Assertion failed}"
+	local expected="$1"
+	local actual="$2"
+	local message="${3:-Assertion failed}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ "$expected" == "$actual" ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Expected: '$expected'"
-        echo -e "    Got:      '$actual'"
-        return 1
-    fi
+	if [[ "$expected" == "$actual" ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Expected: '$expected'"
+		echo -e "    Got:      '$actual'"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -90,21 +90,21 @@ assert_equals() {
 #   assert_success "validate_port 8545" "Valid port should pass"
 ################################################################################
 assert_success() {
-    local command="$1"
-    local message="${2:-Command should succeed}"
+	local command="$1"
+	local message="${2:-Command should succeed}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if eval "$command" &>/dev/null; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Command: $command"
-        return 1
-    fi
+	if eval "$command" &>/dev/null; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Command: $command"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -123,21 +123,21 @@ assert_success() {
 #   assert_failure "validate_port 0" "Invalid port should fail"
 ################################################################################
 assert_failure() {
-    local command="$1"
-    local message="${2:-Command should fail}"
+	local command="$1"
+	local message="${2:-Command should fail}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if ! eval "$command" &>/dev/null; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Command: $command"
-        return 1
-    fi
+	if ! eval "$command" &>/dev/null; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Command: $command"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -157,23 +157,23 @@ assert_failure() {
 #   assert_contains "Hello World" "World" "Should contain World"
 ################################################################################
 assert_contains() {
-    local haystack="$1"
-    local needle="$2"
-    local message="${3:-Should contain substring}"
+	local haystack="$1"
+	local needle="$2"
+	local message="${3:-Should contain substring}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ "$haystack" == *"$needle"* ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Expected substring: '$needle'"
-        echo -e "    In string: '$haystack'"
-        return 1
-    fi
+	if [[ "$haystack" == *"$needle"* ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Expected substring: '$needle'"
+		echo -e "    In string: '$haystack'"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -193,23 +193,23 @@ assert_contains() {
 #   assert_not_contains "Hello World" "Foo" "Should not contain Foo"
 ################################################################################
 assert_not_contains() {
-    local haystack="$1"
-    local needle="$2"
-    local message="${3:-Should not contain substring}"
+	local haystack="$1"
+	local needle="$2"
+	local message="${3:-Should not contain substring}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ "$haystack" != *"$needle"* ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Unexpected substring: '$needle'"
-        echo -e "    In string: '$haystack'"
-        return 1
-    fi
+	if [[ "$haystack" != *"$needle"* ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Unexpected substring: '$needle'"
+		echo -e "    In string: '$haystack'"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -228,21 +228,21 @@ assert_not_contains() {
 #   assert_file_exists "/path/to/file" "File should exist"
 ################################################################################
 assert_file_exists() {
-    local file_path="$1"
-    local message="${2:-File should exist}"
+	local file_path="$1"
+	local message="${2:-File should exist}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ -f "$file_path" ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    File not found: $file_path"
-        return 1
-    fi
+	if [[ -f "$file_path" ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    File not found: $file_path"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -261,21 +261,21 @@ assert_file_exists() {
 #   assert_dir_exists "/path/to/dir" "Directory should exist"
 ################################################################################
 assert_dir_exists() {
-    local dir_path="$1"
-    local message="${2:-Directory should exist}"
+	local dir_path="$1"
+	local message="${2:-Directory should exist}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ -d "$dir_path" ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Directory not found: $dir_path"
-        return 1
-    fi
+	if [[ -d "$dir_path" ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Directory not found: $dir_path"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -294,20 +294,20 @@ assert_dir_exists() {
 #   assert_not_empty "$variable" "Variable should not be empty"
 ################################################################################
 assert_not_empty() {
-    local value="$1"
-    local message="${2:-Value should not be empty}"
+	local value="$1"
+	local message="${2:-Value should not be empty}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ -n "$value" ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        return 1
-    fi
+	if [[ -n "$value" ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -326,21 +326,21 @@ assert_not_empty() {
 #   assert_empty "$variable" "Variable should be empty"
 ################################################################################
 assert_empty() {
-    local value="$1"
-    local message="${2:-Value should be empty}"
+	local value="$1"
+	local message="${2:-Value should be empty}"
 
-    ((TESTS_RUN++))
+	((TESTS_RUN++))
 
-    if [[ -z "$value" ]]; then
-        ((TESTS_PASSED++))
-        echo -e "  ${GREEN}✓${RESET} $message"
-        return 0
-    else
-        ((TESTS_FAILED++))
-        echo -e "  ${RED}✗${RESET} $message"
-        echo -e "    Expected empty, got: '$value'"
-        return 1
-    fi
+	if [[ -z "$value" ]]; then
+		((TESTS_PASSED++))
+		echo -e "  ${GREEN}✓${RESET} $message"
+		return 0
+	else
+		((TESTS_FAILED++))
+		echo -e "  ${RED}✗${RESET} $message"
+		echo -e "    Expected empty, got: '$value'"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -355,22 +355,22 @@ assert_empty() {
 #   print_results
 ################################################################################
 print_results() {
-    echo ""
-    echo -e "${BLUE}========================================${RESET}"
-    echo -e "${BLUE}Test Results${RESET}"
-    echo -e "${BLUE}========================================${RESET}"
-    echo -e "Total:  $TESTS_RUN"
-    echo -e "Passed: ${GREEN}$TESTS_PASSED${RESET}"
-    echo -e "Failed: ${RED}$TESTS_FAILED${RESET}"
-    echo -e "${BLUE}========================================${RESET}"
+	echo ""
+	echo -e "${BLUE}========================================${RESET}"
+	echo -e "${BLUE}Test Results${RESET}"
+	echo -e "${BLUE}========================================${RESET}"
+	echo -e "Total:  $TESTS_RUN"
+	echo -e "Passed: ${GREEN}$TESTS_PASSED${RESET}"
+	echo -e "Failed: ${RED}$TESTS_FAILED${RESET}"
+	echo -e "${BLUE}========================================${RESET}"
 
-    if [[ $TESTS_FAILED -eq 0 ]]; then
-        echo -e "${GREEN}✓ All tests passed!${RESET}"
-        return 0
-    else
-        echo -e "${RED}✗ Some tests failed${RESET}"
-        return 1
-    fi
+	if [[ $TESTS_FAILED -eq 0 ]]; then
+		echo -e "${GREEN}✓ All tests passed!${RESET}"
+		return 0
+	else
+		echo -e "${RED}✗ Some tests failed${RESET}"
+		return 1
+	fi
 }
 
 ################################################################################
@@ -384,6 +384,6 @@ print_results() {
 #   skip_test "Requires network connection"
 ################################################################################
 skip_test() {
-    local message="${1:-Test skipped}"
-    echo -e "  ${YELLOW}⊘${RESET} $message (skipped)"
+	local message="${1:-Test skipped}"
+	echo -e "  ${YELLOW}⊘${RESET} $message (skipped)"
 }

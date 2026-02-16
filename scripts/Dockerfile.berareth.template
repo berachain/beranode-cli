@@ -1,0 +1,52 @@
+# Image source - Alpine chosen for minimal size and fast build times
+FROM alpine:3.23.3
+
+# Build argument for the tag (defaults to "latest" which will fetch the latest release)
+ARG BERA_RETH_TAG=latest
+
+# Check if the architecture is supported
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" != "aarch64" ]; then \
+        echo "This image only supports aarch64 "; \
+        exit 1; \
+    fi
+
+# Install dependencies
+RUN apk update && \
+    apk add --no-cache \
+        curl \
+        wget \
+        git \
+        bash \
+        ncurses \
+        perl \
+        build-base \
+        cargo \
+        rust \
+        clang-dev \
+        llvm-dev
+
+# Build bera-reth - This step will take a little while and your computer fan may start to spin up.
+RUN cd /tmp && git clone https://github.com/berachain/bera-reth.git && \
+    cd bera-reth && \
+    git fetch --tags && \
+    if [ "$BERA_RETH_TAG" = "latest" ]; then \
+        TAG=$(curl -sI https://github.com/berachain/bera-reth/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n'); \
+    else \
+        TAG="$BERA_RETH_TAG"; \
+    fi && \
+    git checkout $TAG && \
+    make build && \
+    cp /tmp/bera-reth/target/release/bera-reth /usr/local/bin/bera-reth && \
+    chmod +x /usr/local/bin/bera-reth
+
+# Clean up - Remove the build dependencies but keep libgcc (provides libgcc_s.so.1 needed at runtime)
+RUN apk del git wget cargo rust clang-dev llvm-dev ncurses perl build-base && \
+    apk add --no-cache libgcc && \
+    rm -rf /tmp/* /var/cache/apk/*
+
+# Confirm bera-reth working
+RUN bera-reth --version
+
+# Ensure the container keeps running if no command is provided
+CMD ["tail", "-f", "/dev/null"]
