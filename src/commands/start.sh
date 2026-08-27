@@ -49,6 +49,7 @@ Start Berachain nodes based on the configuration file.
 Options:
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
+  --external-ip <ip>        Public IP advertised to peers (public networks)
   --help|-h                 Display this help message
 
 Examples:
@@ -57,6 +58,46 @@ Examples:
   beranode start --help
 
 EOF
+}
+
+################################################################################
+# Helper: print_port_section
+# Description: Prints a titled group of port keys from a node config object.
+################################################################################
+print_port_section() {
+	local node_json="$1"
+	local title="$2"
+	shift 2
+	local key value printed=false
+
+	for key in "$@"; do
+		value=$(printf '%s\n' "$node_json" | jq -r --arg k "$key" 'if has($k) and .[$k] != null then .[$k] else empty end')
+		if [[ -n "$value" ]]; then
+			if [[ "$printed" == false ]]; then
+				echo "-- ${title} --"
+				printed=true
+			fi
+			echo "${key}: ${value}"
+		fi
+	done
+}
+
+################################################################################
+# Helper: print_node_ports
+# Description: Prints the listening ports for a node, grouped by component.
+################################################################################
+print_node_ports() {
+	local node_json="$1"
+
+	echo "--------------------------------"
+	echo "Ports"
+	echo "--------------------------------"
+	print_port_section "$node_json" "bera-reth" \
+		ethrpc_port ethp2p_port ethproxy_port \
+		el_ethrpc_port el_ws_port el_authrpc_port el_eth_port el_prometheus_port
+	print_port_section "$node_json" "beacon-kit" \
+		cl_prometheus_port beacond_node_port \
+		configtoml_grpc_laddr configtoml_grpc_privileged_laddr
 }
 
 # =============================================================================
@@ -87,6 +128,19 @@ generate_docker_compose() {
 	local nodes_count=$(jq -r '.total_nodes' "${config_json_path}")
 	local nodes=$(jq -c '.nodes' "${config_json_path}")
 	local base_moniker=$(jq -r '.moniker' "${config_json_path}")
+	local compose_network=$(jq -r '.network' "${config_json_path}")
+	local snapshot_override
+	snapshot_override=$(jq -r '.snapshot_type // empty' "${config_json_path}")
+	local reth_chain_value="/root/.bera-reth/eth-genesis.json"
+	local official_bootnodes=""
+	local official_peers=""
+	if is_public_network "${compose_network}"; then
+		reth_chain_value="$(network_reth_chain "${compose_network}")"
+		local seed_dir="${beranodes_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${compose_network}")"
+		ensure_el_enode_files "${compose_network}" "${seed_dir}" || true
+		official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
+		official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
+	fi
 	
 	log_info "Generating docker-compose.yml for ${nodes_count} node(s)..."
 	
@@ -161,6 +215,8 @@ EOF
 			berareth_bootnodes=$(IFS=,; echo "${bootnode_list[*]}")
 			berareth_trusted_peers="${berareth_bootnodes}"
 		fi
+		berareth_bootnodes="$(merge_enodes "${berareth_bootnodes}" "${official_bootnodes}")"
+		berareth_trusted_peers="$(merge_enodes "${berareth_trusted_peers}" "${official_peers}")"
 		
 		# =================================================================
 		# Generate bera-reth service (execution layer - starts first)
@@ -187,20 +243,28 @@ EOF
       - bera-reth
       - node
 EOF
-		# Add bootnodes if we have peers
 		if [[ -n "${berareth_bootnodes}" ]]; then
 			cat >> "${compose_file}" <<EOF
       - --bootnodes=${berareth_bootnodes}
+EOF
+		fi
+		if [[ -n "${berareth_trusted_peers}" ]]; then
+			cat >> "${compose_file}" <<EOF
       - --trusted-peers=${berareth_trusted_peers}
 EOF
+		fi
+
+		local reth_full_line=""
+		if is_public_network "${compose_network}" && reth_uses_pruning "${role}" "${snapshot_override}"; then
+			reth_full_line=$'      - --full\n'
 		fi
 		
 		cat >> "${compose_file}" <<EOF
       - --authrpc.addr=0.0.0.0
       - --authrpc.port=8551
       - --authrpc.jwtsecret=/root/.bera-reth/jwt.hex
-      - --chain=/root/.bera-reth/eth-genesis.json
-      - --datadir=/root/.bera-reth
+      - --chain=${reth_chain_value}
+${reth_full_line}      - --datadir=/root/.bera-reth
       - --discovery.port=30303
       - --engine.persistence-threshold=0
       - --engine.memory-block-buffer-target=0
@@ -318,12 +382,22 @@ cmd_start() {
 	# -------------------------------------------------------------------------
 
 	local beranodes_dir="${BERANODES_PATH_DEFAULT}"
+	local external_ip=""
 
 	while [[ $# -gt 0 ]]; do
 		case $1 in
 		--beranodes-dir)
 			beranodes_dir=$(parse_beranodes_dir "$2")
 			shift 2
+			;;
+		--external-ip)
+			if [[ -n "${2:-}" ]]; then
+				external_ip="$2"
+				shift 2
+			else
+				log_error "--external-ip requires an IP address"
+				return 1
+			fi
 			;;
 		--help | -h)
 			show_start_help
@@ -464,18 +538,49 @@ cmd_start() {
 			log_error "docker-beacond:${docker_beacond_tag} image not found"
 			return 1
 		fi
+	elif [[ "${mode}" == "local" ]]; then
+		# Verify local binaries exist and can execute natively
+		if [[ ! -x "${bin_beacond}" ]]; then
+			log_error "beacond binary not found or not executable at: ${bin_beacond}"
+			log_error "Run 'beranode init' first to install binaries, or place native binaries in ${beranodes_dir}${BERANODES_PATH_BIN}/"
+			return 1
+		fi
+		if ! "${bin_beacond}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${bin_beacond} cannot execute on this platform."
+			log_error "Local mode requires native binaries. The binary may be built for a different OS/architecture."
+			log_error "Please provide a native '${BIN_BEACONKIT}' binary or use 'beranode init --mode docker' instead."
+			return 1
+		fi
+		log_success "beacond binary is valid: ${bin_beacond}"
+
+		if [[ ! -x "${bin_bera_reth}" ]]; then
+			log_error "bera-reth binary not found or not executable at: ${bin_bera_reth}"
+			log_error "Run 'beranode init' first to install binaries, or place native binaries in ${beranodes_dir}${BERANODES_PATH_BIN}/"
+			return 1
+		fi
+		if ! "${bin_bera_reth}" --version >/dev/null 2>&1; then
+			log_error "bera-reth binary at ${bin_bera_reth} cannot execute on this platform."
+			log_error "Local mode requires native binaries. The binary may be built for a different OS/architecture."
+			log_error "Please provide a native '${BIN_BERARETH}' binary or use 'beranode init --mode docker' instead."
+			return 1
+		fi
+		log_success "bera-reth binary is valid: ${bin_bera_reth}"
 	fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 5] Network-Specific Initialization
 	# -------------------------------------------------------------------------
 	# Route to the appropriate network handler based on the configuration.
-	# Currently supports: devnet (local development)
-	# Planned: bepolia (testnet), mainnet (production)
+	# Currently supports: devnet (local development), bepolia (testnet), mainnet
 	# -------------------------------------------------------------------------
 
-	if [[ "${network}" == "${CHAIN_NAME_DEVNET}" ]]; then
-		log_info "Starting Beranode in ${CHAIN_NAME_DEVNET} network"
+	if [[ "${network}" != "${CHAIN_NAME_DEVNET}" ]] && ! is_public_network "${network}"; then
+		log_error "Unknown network: ${network}. Supported: ${CHAIN_NAME_DEVNET}, ${CHAIN_NAME_TESTNET}, ${CHAIN_NAME_MAINNET}"
+		return 1
+	fi
+
+	if [[ "${network}" == "${CHAIN_NAME_DEVNET}" ]] || is_public_network "${network}"; then
+		log_info "Starting Beranode in ${network} network"
 
 		# ---------------------------------------------------------------------
 		# [STEP 5.1] Mode Selection: Local Development
@@ -517,25 +622,42 @@ cmd_start() {
 				fi
 			fi
 
-			# Do a a check if `beranode_dir/nodes` has any directories, if so, ask if the user wants to delete them
+			# Do a check if `beranode_dir/nodes` has any directories, if so, ask if the user wants to delete them
 			if [ -d "${beranode_dir}/nodes" ] && [ "$(ls -A "${beranode_dir}/nodes")" ]; then
-				log_warn "Node directories already exist in ${beranode_dir}/nodes"
-				read -p "Do you want to delete them? (y/n) " delete_nodes
-				if [ "${delete_nodes}" == "y" ]; then
-					rm -rf "${beranode_dir}/nodes"
-					log_info "Node directories deleted"
+				if is_public_network "${network}"; then
+					log_info "Keeping existing public-network node directories (snapshots and keys would be lost if deleted)"
 				else
-					log_error "Node directories not deleted. stopping..."
-					return 1
+					log_warn "Node directories already exist in ${beranode_dir}/nodes"
+					read -p "Do you want to delete them? (y/n) " delete_nodes
+					if [ "${delete_nodes}" == "y" ]; then
+						rm -rf "${beranode_dir}/nodes"
+						log_info "Node directories deleted"
+					else
+						log_error "Node directories not deleted. stopping..."
+						return 1
+					fi
 				fi
 			fi
 			mkdir -p "${beranode_dir}/nodes"
 			log_info "Node directories created in ${beranode_dir}/nodes"
 
 			local network=$(jq -r '.network' "${config_json_path}")
-			local chain_id="${CHAIN_ID_DEVNET}"
-			local chain_spec="${CHAIN_NAME_DEVNET}"
+			local chain_id
+			chain_id="$(network_chain_id "${network}")"
+			local chain_spec
+			chain_spec="$(network_beacon_chain_spec "${network}")"
 			local chain_id_beacond=$(jq -r '.clienttoml.chain_id' "${config_json_path}")
+			local snapshot_type_override
+			snapshot_type_override=$(jq -r '.snapshot_type // empty' "${config_json_path}")
+
+			if is_public_network "${network}" && [[ -z "${external_ip}" ]]; then
+				external_ip="$(detect_external_ip)"
+				if [[ -n "${external_ip}" ]]; then
+					log_info "Detected external IP: ${external_ip}"
+				else
+					log_warn "Could not detect external IP; P2P may fail behind NAT. Pass --external-ip."
+				fi
+			fi
 
 			local wallet_address=$(jq -r '.wallet_address' "${config_json_path}")
 			local wallet_private_key=$(jq -r '.wallet_private_key' "${config_json_path}")
@@ -769,13 +891,16 @@ cmd_start() {
 				mkdir -p "${bera_reth_dir}"
 				log_success "✔ Directories made"
 
-				# Init beacond node
-				if [[ "$mode" == "docker" ]]; then
+				# Init beacond node (skip if home already exists so snapshot data is kept)
+				if [[ -f "${beacond_dir}/config/config.toml" ]]; then
+					log_info "Beacond home already initialized at ${beacond_dir}; keeping existing data"
+				elif [[ "$mode" == "docker" ]]; then
 					docker run --rm -v ${beacond_dir}:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+					log_success "✔ Beacond node initialized"
 				else
 					${bin_beacond} init "${moniker}" --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec "${chain_spec}" --home "${beacond_dir}" 2>/dev/null
+					log_success "✔ Beacond node initialized"
 				fi
-				log_success "✔ Beacond node initialized"
 
 				# - replace priv_validator_key.json
 				cat >"${beacond_dir}/config/priv_validator_key.json" <<EOF
@@ -1157,6 +1282,11 @@ EOF
 					# persistent_peers
 					sed "${SED_OPT[@]}" "s|^persistent_peers = \".*\"|persistent_peers = \"${configtoml_p2p_persistent_peers}\"|" "${node_dir}/beacond/config/config.toml"
 				fi
+				# Public networks: keep official seeds from config (do not replace with local-only mesh)
+				if is_public_network "${network}"; then
+					configtoml_p2p_seeds=$(jq -r '.configtoml.p2p_seeds' "${config_json_path}")
+					sed "${SED_OPT[@]}" "s|^seeds = \".*\"|seeds = \"${configtoml_p2p_seeds}\"|" "${node_dir}/beacond/config/config.toml"
+				fi
 
 				# addr_book_file
 				if [[ "${mode}" == "docker" ]]; then
@@ -1310,24 +1440,38 @@ EOF
 				log_success "✔ config.toml updated"
 
 				# Init bera-reth node
-				cp "${beranodes_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" "${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}"
-				if [[ "${mode}" == "docker" ]]; then
-					docker run --rm -v ${bera_reth_dir}:/root/.bera-reth docker-bera-reth:${docker_berareth_tag} bera-reth init --chain=/root/.bera-reth/${GENESIS_ETH_NAME_DEFAULT} --datadir=/root/.bera-reth >/dev/null 2>&1
-					# Copy jwt.hex for bera-reth in Docker mode
-					cp "${node_dir}/beacond/config/jwt.hex" "${bera_reth_dir}/jwt.hex"
+				if is_public_network "${network}"; then
+					# Built-in --chain preset; do not run `bera-reth init` (it would wipe snapshots).
+					if [[ "${mode}" == "docker" ]]; then
+						cp "${node_dir}/beacond/config/jwt.hex" "${bera_reth_dir}/jwt.hex" 2>/dev/null || true
+					fi
+					if [ -f "${bera_reth_dir}/discovery-secret" ]; then
+						rm -f "${bera_reth_dir}/discovery-secret"
+					fi
+					local bera_reth_private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
+					echo -n "${bera_reth_private_key}" > "${bera_reth_dir}/discovery-secret"
+					log_success "✔ bera-reth datadir ready (public network; snapshot data preserved)"
 				else
-					${bin_bera_reth} init \
-						--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
-						--datadir="${bera_reth_dir}" >/dev/null 2>&1
+					cp "${beranodes_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}" "${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}"
+					if [[ "${mode}" == "docker" ]]; then
+						docker run --rm -v ${bera_reth_dir}:/root/.bera-reth docker-bera-reth:${docker_berareth_tag} bera-reth init --chain=/root/.bera-reth/${GENESIS_ETH_NAME_DEFAULT} --datadir=/root/.bera-reth >/dev/null 2>&1
+						# Copy jwt.hex for bera-reth in Docker mode
+						cp "${node_dir}/beacond/config/jwt.hex" "${bera_reth_dir}/jwt.hex"
+					else
+						${bin_bera_reth} init \
+							--chain="${bera_reth_dir}/${GENESIS_ETH_NAME_DEFAULT}" \
+							--datadir="${bera_reth_dir}" >/dev/null 2>&1
+					fi
+					# remove existing discovery-secret and add the node's secret
+					if [ -f "${bera_reth_dir}/discovery-secret" ]; then
+						rm -f "${bera_reth_dir}/discovery-secret"
+					fi
+					# Write the discovery secret for bera-reth
+					local bera_reth_private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
+					echo -n "${bera_reth_private_key}" > "${bera_reth_dir}/discovery-secret"
+					log_success "✔ bera-reth node initialized"
 				fi
-				# remove existing discovery-secret and add the node's secret
-				if [ -f "${bera_reth_dir}/discovery-secret" ]; then
-					rm -f "${bera_reth_dir}/discovery-secret"
-				fi
-				# Write the discovery secret for bera-reth
-				local bera_reth_private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
-				echo -n "${bera_reth_private_key}" > "${bera_reth_dir}/discovery-secret"
-				log_success "✔ bera-reth node initialized"
+				print_node_ports "${node_json}"
 			done
 
 			# Start the nodes
@@ -1355,6 +1499,13 @@ EOF
 				
 				if [[ $? -eq 0 ]]; then
 					log_success "✔ All nodes started successfully with docker-compose"
+					local nodes=$(jq -c '.nodes' "${config_json_path}")
+					for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+						echo "--------------------------------"
+						echo "Starting node $node_index"
+						echo "--------------------------------"
+						print_node_ports "$(echo "${nodes}" | jq -c ".[$node_index]")"
+					done
 					log_info "To view logs: docker-compose -f ${compose_file} logs -f"
 					log_info "To stop: docker-compose -f ${compose_file} down"
 				else
@@ -1434,20 +1585,43 @@ EOF
 
 					# Add discovery secret - enode bera-reth id
 					echo -n "${private_key}" >"${bera_reth_dir}/discovery-secret" 2>/dev/null
+
+					local reth_chain_arg="--chain=${bera_reth_dir}/eth-genesis.json"
+					local reth_full_arg=""
+					local nat_arg="--nat=extip:127.0.0.1"
+					if is_public_network "${network}"; then
+						reth_chain_arg="--chain=$(network_reth_chain "${network}")"
+						if reth_uses_pruning "${role}" "${snapshot_type_override}"; then
+							reth_full_arg="--full"
+						fi
+						if [[ -n "${external_ip}" ]]; then
+							nat_arg="--nat=extip:${external_ip}"
+						else
+							nat_arg=""
+						fi
+						local seed_dir="${beranode_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${network}")"
+						ensure_el_enode_files "${network}" "${seed_dir}" || true
+						local official_bootnodes official_peers
+						official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
+						official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
+						configtoml_berareth_bootnodes="$(merge_enodes "${configtoml_berareth_bootnodes}" "${official_bootnodes}")"
+						configtoml_berareth_trusted_peers="$(merge_enodes "${configtoml_berareth_trusted_peers}" "${official_peers}")"
+					fi
 					
 					${bin_bera_reth} node \
 						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
 						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
+						$([[ -z "${reth_full_arg}" ]] || echo "${reth_full_arg}") \
 						--authrpc.addr="127.0.0.1" \
 						--authrpc.port="${el_authrpc_port}" \
 						--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
-						--chain="${bera_reth_dir}/eth-genesis.json" \
+						"${reth_chain_arg}" \
 						--datadir="${bera_reth_dir}" \
 						--discovery.port="${el_eth_port}" \
 						--engine.persistence-threshold=0 \
 						--engine.memory-block-buffer-target=0 \
 						--http \
-						--nat="extip:127.0.0.1" \
+						$([[ -z "${nat_arg}" ]] || echo "${nat_arg}") \
 						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
 						--http.addr=0.0.0.0 \
 						--http.port="${el_ethrpc_port}" \
@@ -1461,6 +1635,7 @@ EOF
 					local pid=$!
 					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
 					log_success "✔ Bera-reth node started"
+					print_node_ports "${node_json}"
 				done
 			fi
 		else

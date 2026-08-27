@@ -10,13 +10,15 @@ A command-line tool for managing Berachain nodes.
 
 ## Overview
 
-`beranode` is a CLI tool that simplifies the process of setting up and managing Berachain blockchain nodes. It supports multiple networks (devnet, testnet, mainnet) and can manage validator, full, and pruned nodes.
+`beranode` is a CLI tool that simplifies the process of setting up and managing Berachain blockchain nodes. It supports multiple networks (`devnet`, `bepolia`, `mainnet`) and can manage validator, full, and pruned nodes.
 
 ## Prerequisites
 
 - Bash shell
 - Cast CLI version 1.4.3 or higher - https://getfoundry.sh
-- Required Berachain binaries:
+- `curl`, `tar`
+- `lz4` — required to extract official chain-state snapshots (`brew install lz4` or `apt-get install lz4`)
+- Required Berachain binaries (downloaded by `init` if missing):
   - `beacond` (BeaconKit consensus client)
   - `bera-reth` (Reth execution client)
 
@@ -47,6 +49,10 @@ Initialize a new Berachain node with specified configuration.
 - `--validators <count>` - Number of validator nodes to create
 - `--full-nodes <count>` - Number of full nodes to create
 - `--pruned-nodes <count>` - Number of pruned nodes to create
+- `--skip-snapshot` - Skip official snapshot download on bepolia/mainnet (sync from genesis instead)
+- `--snapshot-type <pruned|archive>` - Force one snapshot type for every node (default: role-mapped)
+- `--beacond-version <tag>` - BeaconKit release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
+- `--berareth-version <tag>` - bera-reth release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
 - `--force` - Force initialization (overwrite existing configuration)
 - `--wallet-private-key <key>` - Private key for the wallet
 - `--wallet-address <address>` - Wallet address
@@ -56,6 +62,9 @@ Initialize a new Berachain node with specified configuration.
 ```bash
 # Initialize a devnet validator node
 ./beranode init --network devnet --validators 1
+
+# Initialize a Bepolia testnet node (official genesis + snapshots)
+./beranode init --network bepolia --validators 1
 
 # Initialize multiple nodes with custom moniker
 ./beranode init --moniker mynode --validators 2 --full-nodes 1
@@ -67,17 +76,32 @@ Initialize a new Berachain node with specified configuration.
 ./beranode start [options]
 ```
 
-Start a Berachain node that has been initialized.
+Start a Berachain node that has been initialized. Network is read from `beranodes.config.json`.
 
 **Options:**
-- `--moniker <name>` - Node name to start
-- `--network <network>` - Network specification
+- `--beranodes-dir <path>` - Beranodes data directory (default: `./beranodes`)
+- `--external-ip <ip>` - Public IP advertised to peers (bepolia/mainnet)
 
 **Example:**
 ```bash
-# Start a node
-./beranode start --moniker mynode --network devnet
+./beranode start
 ```
+
+#### Snapshots (bepolia / mainnet)
+
+```bash
+./beranode snapshot [download|restore] [options]
+```
+
+Download and restore official chain-state snapshots from [bepolia.snapshots.berachain.com](https://bepolia.snapshots.berachain.com) or [snapshots.berachain.com](https://snapshots.berachain.com).
+
+`init --network bepolia` (or `mainnet`) does this automatically. Use `beranode snapshot` to refresh later. Nodes must be stopped before `restore`.
+
+**Defaults:** `rpc-pruned` and `validator` nodes get **pruned** snapshots; `rpc-full` nodes get **archive**. `--snapshot-type pruned|archive` overrides every node.
+
+Pruned Bepolia execution snapshots are ~10.5 GB; archive execution is ~42 GB. Mainnet archive execution is ~1 TB. The CLI prints types, sizes, and destination nodes, then continues. If `{network}-beacond-{type}-latest.tar.lz4` and `{network}-reth-{type}-latest.tar.lz4` are already in `beranodes/snapshots/`, you are prompted first: overwrite with a fresh network download (`y`) or keep the local files (`N`, default). Keeping them skips the download. Re-running `init` on an existing `beranodes` directory preserves `beranodes/snapshots/` so previously downloaded archives are not deleted.
+
+Validator keys are generated on public networks, but the node is **not** in the public validator set until you deposit separately. This CLI does not automate that deposit.
 
 #### Validate Configuration
 
@@ -314,20 +338,26 @@ The test suite uses a custom lightweight bash testing framework ([tests/test_fra
   - URL validation (http, https, tcp, ws, wss)
   - Moniker validation (length and format)
   - Duration validation (s, m, h, ms, us, ns)
+- **[test_download.sh](tests/test_download.sh)** - Tests for GitHub release asset URL matching
+- **[test_snapshots.sh](tests/test_snapshots.sh)** - Tests for public-network URL mapping, role→snapshot type, and index.csv selection
 
 ### Running Tests
 
-Execute all tests from the tests directory:
+Execute tests from the tests directory:
 
 ```bash
 cd tests
 ./test_validation.sh
+./test_download.sh
+./test_snapshots.sh
 ```
 
 Or run from the project root:
 
 ```bash
 bash tests/test_validation.sh
+bash tests/test_download.sh
+bash tests/test_snapshots.sh
 ```
 
 ### Test Output Example
@@ -374,104 +404,72 @@ assert_failure 'your_function "invalid input"' "Should reject invalid input"
 print_results
 ```
 
+## Changelog
+
+User-facing changes are recorded in [CHANGELOG.md](CHANGELOG.md) using [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Write new work under `[Unreleased]` in the matching category:
+
+- **Added** — new features
+- **Changed** — changes in existing behavior
+- **Deprecated** — soon-to-be-removed features
+- **Removed** — removed features
+- **Fixed** — bug fixes
+- **Security** — vulnerability fixes
+
+Do not edit historical `## [X.Y.Z]` sections. When releasing, promote `[Unreleased]` by hand:
+
+1. Move the `[Unreleased]` entries into a dated `## [X.Y.Z] - YYYY-MM-DD` section
+2. Leave a fresh empty `[Unreleased]` template (with the six category headings) above it
+3. Optionally add **Summary** and **Changed Files**
+4. Update the compare links at the bottom (`[Unreleased]: …compare/vX.Y.Z...HEAD` and `[X.Y.Z]: …compare/vPREV...vX.Y.Z`)
+
+[.github/workflows/release.yml](.github/workflows/release.yml) copies that version section into the GitHub Release body.
+
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/) (SemVer). Version numbers follow the format `MAJOR.MINOR.PATCH`:
+This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current CLI version is **0.9.0**. The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary. `beranode version` / `--version` / `-v` print `beranode v${BERANODE_VERSION}`.
+
+Version numbers use `MAJOR.MINOR.PATCH`, with optional prereleases:
 
 - **MAJOR**: Incompatible API changes
 - **MINOR**: New functionality in a backwards-compatible manner
 - **PATCH**: Backwards-compatible bug fixes
+- **Prerelease**: `X.Y.Z-rc.N`, `X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, or `X.Y.Z-pre.N`
 
-### Bumping Versions
+Do not rewrite every `vX.Y.Z` string in the tree. Runtime version output always comes from `BERANODE_VERSION`.
 
-Use the [scripts/bump-version.sh](scripts/bump-version.sh) script to manage version updates:
+### Client versions (beacond / bera-reth)
+
+`init` downloads client binaries when they are missing. On `bepolia` and `mainnet`, `latest` (the default) is replaced with the recommended tags in [src/lib/constants.sh](src/lib/constants.sh) / [src/lib/network.sh](src/lib/network.sh):
+
+| Network | beacond | bera-reth |
+| --- | --- | --- |
+| bepolia | `v1.4.2-rc.0` | `v1.4.4` |
+| mainnet | `v1.4.1` | `v1.4.4` |
+| devnet | GitHub `latest` | GitHub `latest` |
+
+Override with `--beacond-version` / `--berareth-version`. Accepted tags: `latest`, `vX.Y.Z`, `vX.Y.Z-rc.N`, or `vX.Y.Z-rcN`.
+
+### Releasing
+
+1. Set `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh) (and the VERSION header in [src/core/dispatcher.sh](src/core/dispatcher.sh) if it is present)
+2. Promote `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) as described above
+3. Rebuild the binary: `./build.sh`
+4. Commit those files and create an annotated tag matching the version:
 
 ```bash
-# Increment patch version (e.g., 0.1.0 -> 0.1.1)
-./scripts/bump-version.sh patch
-
-# Increment minor version (e.g., 0.1.0 -> 0.2.0)
-./scripts/bump-version.sh minor
-
-# Increment major version (e.g., 0.1.0 -> 1.0.0)
-./scripts/bump-version.sh major
-
-# Set a specific version (e.g., 2.5.3)
-./scripts/bump-version.sh 2.5.3
+git tag -a v0.10.0 -m "Release v0.10.0"
+git push origin HEAD
+git push origin v0.10.0
 ```
 
-### Script Options
-
-- `--dry-run` - Preview changes without modifying files
-- `--tag` - Automatically create a git tag and commit
-- `-m, --message TEXT` - Add a description of changes for commit and tag messages
-- `-h, --help` - Show help information
-
-### Examples
-
-**Preview a version bump:**
-```bash
-./scripts/bump-version.sh patch --dry-run
-```
-
-**Bump version and create a git tag:**
-```bash
-./scripts/bump-version.sh minor --tag
-```
-
-**Bump version with a description:**
-```bash
-./scripts/bump-version.sh patch --tag -m "Fix authentication bug and improve error handling"
-```
-
-**Manual release workflow:**
-```bash
-# 1. Update CHANGELOG.md with your changes
-# 2. Bump the version
-./scripts/bump-version.sh minor
-
-# 3. Review the changes
-git diff
-
-# 4. Commit and tag
-git add -A
-git commit -m "chore: release v0.2.0"
-git tag -a v0.2.0 -m "Release v0.2.0"
-
-# 5. Push to remote
-git push origin main --tags
-```
-
-**Automated release workflow with description:**
-```bash
-# 1. Update CHANGELOG.md with your changes
-# 2. Bump version, commit, and tag in one step
-./scripts/bump-version.sh minor --tag -m "Add new user profile feature"
-
-# 3. Push to remote
-git push origin main --tags
-```
-
-### What the Script Does
-
-The `bump-version.sh` script automatically:
-1. Updates `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh)
-2. Rebuilds the [beranode](beranode) file from sources
-3. Updates [CHANGELOG.md](CHANGELOG.md) with:
-   - A new version section (newest versions at top, chronological order)
-   - Summary section (if `-m, --message` is provided)
-   - Changed Files section listing all modified files
-   - Standard changelog categories (Added, Changed, Deprecated, Removed, Fixed, Security)
-4. Updates version comparison links in the changelog
-5. Optionally creates a git commit and tag (with `--tag` flag)
-6. Includes a custom description in commit and tag messages (with `-m, --message` flag)
+Pushing a `vX.Y.Z` or `vX.Y.Z-*` tag triggers [.github/workflows/release.yml](.github/workflows/release.yml). The workflow reads the matching changelog section, marks prerelease tags as prereleases, and creates a [GitHub Release](https://github.com/berachain/beranode-cli/releases) with the `beranode` binary attached (or uploads `beranode` onto an existing release).
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.
 
 When contributing:
-1. Document your changes in the [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section
+1. Document your changes in [CHANGELOG.md](CHANGELOG.md) under `[Unreleased]` (see [Changelog](#changelog))
 2. Follow the existing code style and conventions
 3. Test your changes thoroughly before submitting
 

@@ -36,7 +36,8 @@ set -euo pipefail
 #
 # [5] DIRECTORY STRUCTURE SETUP
 #     └─ Create beranodes directory structure
-#     └─ Ensure bin/, tmp/, log/, nodes/ directories exist
+#     └─ Preserve snapshots/ if re-initializing an existing directory
+#     └─ Ensure bin/, tmp/, log/, nodes/, snapshots/ directories exist
 #
 # [6] BINARY VERIFICATION
 #     └─ Check for beacond binary
@@ -102,6 +103,8 @@ GENERAL OPTIONS:
     --validators <count>            Number of validator nodes (default: 1)
     --full-nodes <count>            Number of full nodes (default: 0)
     --pruned-nodes <count>          Number of pruned nodes (default: 0)
+    --skip-snapshot                 Skip official snapshot download (public networks only)
+    --snapshot-type <pruned|archive> Force one snapshot type for every node (default: role-mapped)
     --docker                        Enable Docker mode
     --wallet-private-key <key>      Private key for the wallet
     --wallet-address <address>      Wallet address
@@ -334,7 +337,7 @@ cmd_init() {
 	# =========================================================================
 	# Check for help flag first before any other processing
 
-	if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+	if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
 		show_init_help
 		return 0
 	fi
@@ -377,8 +380,10 @@ cmd_init() {
 	local chain_id=$CHAIN_ID_DEVNET
 	local force=false
 	local skip_genesis=false
+	local skip_snapshot=false
+	local snapshot_type=""
 	local total_nodes=0
-	local validators=1
+	local validators=0
 	local full_nodes=0
 	local pruned_nodes=0
 	local docker_mode=false
@@ -612,7 +617,7 @@ cmd_init() {
 		--beacond-version)
 			if [[ -n "$2" ]]; then
 				check_beacond_version="$2"
-				if [[ ! "$check_beacond_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+				if [[ ! "$check_beacond_version" =~ $VERSION_TAG_REGEX ]]; then
 					log_warn "--beacond-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.9.0, v0.9.0-rc2)"
 					log_warn "defaulting to ${beacond_version}..."
 				else
@@ -628,7 +633,7 @@ cmd_init() {
 		--berareth-version)
 			if [[ -n "$2" ]]; then
 				check_berareth_version="$2"
-				if [[ ! "$check_berareth_version" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
+				if [[ ! "$check_berareth_version" =~ $VERSION_TAG_REGEX ]]; then
 					log_warn "--berareth-version must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.9.0, v0.9.0-rc2)"
 					log_warn "defaulting to ${berareth_version}..."
 				else
@@ -755,6 +760,23 @@ cmd_init() {
 				shift 2
 			else
 				shift
+			fi
+			;;
+		--skip-snapshot)
+			skip_snapshot=true
+			shift
+			;;
+		--snapshot-type)
+			if [[ -n "$2" ]]; then
+				if [[ "$2" != "pruned" && "$2" != "archive" ]]; then
+					log_error "--snapshot-type must be pruned or archive"
+					return 1
+				fi
+				snapshot_type="$2"
+				shift 2
+			else
+				log_error "--snapshot-type requires a value (pruned or archive)"
+				return 1
 			fi
 			;;
 		--wallet-private-key)
@@ -2242,6 +2264,10 @@ cmd_init() {
 	# Port overrides - placeholder to be replaced per-node during config generation
 	PORT_DEFINED_BY_NODE="<PORT_DEFINED_BY_NODE>"
 	clienttoml_chain_id="${network}-beacon-${chain_id}"
+  # adjustment for bepolia network
+	if [[ "${network}" == "${CHAIN_NAME_TESTNET}" ]]; then
+		clienttoml_chain_id="testnet-beacon-${chain_id}"
+	fi
 	clienttoml_node="tcp://localhost:$PORT_DEFINED_BY_NODE"
 	apptoml_beacon_kit_engine_rpc_dial_url="http://localhost:$PORT_DEFINED_BY_NODE"
 	apptoml_beacon_kit_node_api_address="0.0.0.0:$PORT_DEFINED_BY_NODE"
@@ -2252,7 +2278,7 @@ cmd_init() {
 	configtoml_moniker="$moniker"
 
 	# Validate validator count - must be a positive integer
-	if ! [[ "$validators" =~ ^[0-9]+$ ]] || [[ "$validators" -le 0 ]]; then
+	if (! [[ "$validators" =~ ^[0-9]+$ ]] || [[ "$validators" -le 0 ]]) && ! is_public_network "${network}"; then
 		log_warn "validators is not a valid positive integer. defaulting to 1"
 		validators=1
 	fi
@@ -2265,10 +2291,23 @@ cmd_init() {
 			log_warn "total nodes is 0. defaulting to ${validators} validator, ${full_nodes} rpc full node, and ${pruned_nodes} rpc pruned node"
 		fi
 	fi
-	# testnet defaults
-	# TODO
-	# mainnet defaults
-	# TODO
+	# public network (bepolia / mainnet) defaults
+	if is_public_network "${network}"; then
+		skip_genesis=true
+		apptoml_beacon_kit_chain_spec="$(network_beacon_chain_spec "${network}")"
+		if [[ "${beacond_version}" == "latest" ]]; then
+			beacond_version="$(network_recommended_beacond_version "${network}")"
+			log_info "Using recommended beacond version for ${network}: ${beacond_version}"
+		fi
+		if [[ "${berareth_version}" == "latest" ]]; then
+			berareth_version="$(network_recommended_berareth_version "${network}")"
+			log_info "Using recommended bera-reth version for ${network}: ${berareth_version}"
+		fi
+		if [[ "${validators}" -gt 0 ]]; then
+			log_warn "Validator nodes on ${network} receive keys (priv_validator_key.json) but are NOT in the public validator set."
+			log_warn "They will sync as full consensus participants until you deposit separately. This CLI does not automate the deposit."
+		fi
+	fi
 
 	# Output configuration settings
 	echo "========= Configuration Settings ========="
@@ -2280,6 +2319,8 @@ cmd_init() {
 	echo "Total Nodes:     $total_nodes"
 	echo "Beranode Dir:    ${BERANODES_PATH:-<unset>}"
 	echo "Skip Genesis:    ${skip_genesis:-false}"
+	echo "Skip Snapshot:   ${skip_snapshot:-false}"
+	echo "Snapshot Type:   ${snapshot_type:-role-mapped}"
 	echo "Force:           ${force:-false}"
 	echo "Mode:            ${mode}"
 	echo "=========================================="
@@ -2288,18 +2329,61 @@ cmd_init() {
 	# =========================================================================
 	# [5] DIRECTORY STRUCTURE SETUP
 	# =========================================================================
-	# Create all required beranodes directory structure
+	# Check if beranodes directory already exists and prompt for override
+	if [[ -d "${BERANODES_PATH}" ]]; then
+		local snapshots_dir="${BERANODES_PATH}${BERANODES_PATH_SNAPSHOTS}"
+		local preserve_snapshots=false
+		if [[ -d "${snapshots_dir}" ]]; then
+			preserve_snapshots=true
+		fi
 
+		log_warn "Beranodes directory already exists: ${BERANODES_PATH}"
+		echo ""
+		echo -e "${YELLOW}An existing beranodes directory was found.${RESET}"
+		echo -e "${YELLOW}Re-initializing will remove the current directory and create a fresh one.${RESET}"
+		echo -e "${YELLOW}This will delete all existing node data, binaries, and configuration.${RESET}"
+		if [[ "${preserve_snapshots}" == true ]]; then
+			echo -e "${YELLOW}The snapshots directory will be preserved.${RESET}"
+		fi
+		echo ""
+		read -p "Do you want to remove and re-initialize? (y/n): " confirm_override
+		case "$confirm_override" in
+		y | Y | yes | Yes | YES)
+			if [[ "${preserve_snapshots}" == true ]]; then
+				log_info "Removing existing beranodes directory (preserving snapshots): ${BERANODES_PATH}"
+				find "${BERANODES_PATH}" -mindepth 1 -maxdepth 1 \
+					! -name "$(basename "${BERANODES_PATH_SNAPSHOTS}")" \
+					-exec rm -rf {} +
+				log_success "Existing directory removed. Snapshots preserved at ${snapshots_dir}"
+			else
+				log_info "Removing existing beranodes directory: ${BERANODES_PATH}"
+				rm -rf "${BERANODES_PATH}"
+				log_success "Existing directory removed."
+			fi
+			;;
+		*)
+			log_warn "Initialization aborted by user."
+			return 0
+			;;
+		esac
+	fi
+
+	# Create all required beranodes directory structure
 	ensure_dir_exists "${BERANODES_PATH}" "beranode directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_BIN}" "beranode binary directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_TMP}" "beranode temporary directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_LOGS}" "beranode log directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_NODES}" "beranode nodes directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_RUNS}" "beranode runs directory" || return 1
+	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_SNAPSHOTS}" "beranode snapshots directory" || return 1
 
 	# =========================================================================
 	# [6] BINARY VERIFICATION
 	# =========================================================================
+	# Initialize docker tag variables (set by docker mode, empty for local mode)
+	local docker_beacond_tag="${docker_beacond_tag:-}"
+	local docker_berareth_tag="${docker_berareth_tag:-}"
+
 	# Verify beacond and bera-reth binaries exist and are executable
 	if [[ "$mode" == "local" ]]; then
 		missing_binaries=0
@@ -2309,13 +2393,15 @@ cmd_init() {
 			log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
 		else
 			# Check if 'beacond version' command executes successfully
-			beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
-			if [[ $? -eq 0 ]]; then
+			local beacon_version=""
+			if beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"; then
 				log_success "'${BIN_BEACONKIT} version' works as expected."
 				log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
 				is_beacond_installed=true
 			else
-				log_error "'${BIN_BEACONKIT} version' did not work as expected."
+				# Binary exists but can't execute natively — needs rebuilding
+				log_warn "'${BIN_BEACONKIT}' exists but cannot execute on this platform."
+				log_info "Will attempt to build from source..."
 			fi
 		fi
 
@@ -2324,7 +2410,7 @@ cmd_init() {
 			download_beranodes_binary \
 				--config-dir "${BERANODES_PATH}" \
 				--binary-to-download "${BIN_BEACONKIT}" \
-				--version-tag "latest"
+				--version-tag "${beacond_version}"
 		fi
 
 		# - berareth
@@ -2334,13 +2420,15 @@ cmd_init() {
 			missing_binaries=1
 		else
 			# Check if 'berareth version' command executes successfully
-			bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
-			if [[ $? -eq 0 ]]; then
+			local bera_reth_version=""
+			if bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"; then
 				log_success "'${BIN_BERARETH} --version' works as expected."
 				log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
 				is_berareth_installed=true
 			else
-				log_error "'${BIN_BERARETH} --version' did not work as expected."
+				# Binary exists but can't execute natively — needs rebuilding
+				log_warn "'${BIN_BERARETH}' exists but cannot execute on this platform."
+				log_info "Will attempt to build from source..."
 			fi
 		fi
 
@@ -2349,7 +2437,7 @@ cmd_init() {
 			download_beranodes_binary \
 				--config-dir "${BERANODES_PATH}" \
 				--binary-to-download "${BIN_BERARETH}" \
-				--version-tag "latest"
+				--version-tag "${berareth_version}"
 		fi
 	# Mode meant for linux only
 	elif [[ "$mode" == "docker" ]]; then
@@ -2498,6 +2586,20 @@ cmd_init() {
 	# Create beranodes.config.json with all node configurations
 
 	print_header "Creating base beranodes.config.json file..."
+
+	# Public networks: fetch official genesis, KZG, seeds, and toml overlays.
+	if is_public_network "${network}"; then
+		local seed_dir="${BERANODES_PATH}${BERANODES_PATH_TMP}/seed-data-${chain_id}"
+		fetch_network_seed_data "${network}" "${seed_dir}" || return 1
+		cp -f "${seed_dir}/kzg-trusted-setup.json" "${BERANODES_PATH}${BERANODES_PATH_TMP}/kzg-trusted-setup.json"
+		cp -f "${seed_dir}/genesis.json" "${BERANODES_PATH}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
+		local official_seeds
+		official_seeds="$(parse_toml_seeds "${seed_dir}/config.toml")"
+		if [[ -n "${official_seeds}" ]]; then
+			configtoml_p2p_seeds="${official_seeds}"
+			log_info "Loaded official P2P seeds for ${network}"
+		fi
+	fi
 
 	# Create beranodes.config.json with settings as JSON
 	config_json_path="${BERANODES_PATH}/beranodes.config.json"
@@ -2928,6 +3030,8 @@ cmd_init() {
 			--argjson total_nodes "$total_nodes" \
 			--arg beranode_dir "$BERANODES_PATH" \
 			--argjson skip_genesis "$skip_genesis" \
+			--argjson skip_snapshot "$skip_snapshot" \
+			--arg snapshot_type "$snapshot_type" \
 			--argjson force "$force" \
 			--arg mode "$mode" \
 			--arg wallet_private_key "$wallet_private_key" \
@@ -2947,6 +3051,8 @@ cmd_init() {
             total_nodes: $total_nodes,
             beranode_dir: $beranode_dir,
             skip_genesis: $skip_genesis,
+            skip_snapshot: $skip_snapshot,
+            snapshot_type: $snapshot_type,
             force: $force,
             mode: $mode,
             wallet_private_key: $wallet_private_key,
@@ -2972,9 +3078,12 @@ cmd_init() {
 
 		# Check if kzg-trusted-setup.json exists, otherwise download it
 		if [[ ! -f "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" ]]; then
+			local kzg_url="${REPO_BEACONKIT}/kzg-trusted-setup.json"
+			if is_public_network "${network}"; then
+				kzg_url="$(network_seed_data_url "${network}")/kzg-trusted-setup.json"
+			fi
 			log_info "Downloading kzg-trusted-setup.json to ${BERANODES_PATH}/tmp"
-			echo "$REPO_BEACONKIT/kzg-trusted-setup.json"
-			curl -s -o "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" "$REPO_BEACONKIT/kzg-trusted-setup.json"
+			curl -s -o "${BERANODES_PATH}/tmp/kzg-trusted-setup.json" "$kzg_url"
 			if [[ $? -eq 0 ]]; then
 				log_success "Downloaded kzg-trusted-setup.json successfully."
 			else
@@ -2988,38 +3097,101 @@ cmd_init() {
 		# =========================================================================
 		# [10] GENESIS FILE SETUP
 		# =========================================================================
-		# Step 1: Generate base beranodes.config.json file
-		generate_base_beacond_config \
-			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}" \
-			--mode "${mode}" \
-			--docker-beacond-tag "${docker_beacond_tag}" \
-			--docker-berareth-tag "${docker_berareth_tag}"
+		if is_public_network "${network}"; then
+			# Join the existing public chain: keys only, official genesis, no premined deposits.
+			generate_base_beacond_config \
+				--config-dir "${BERANODES_PATH}" \
+				--chain-spec "${network}" \
+				--mode "${mode}" \
+				--docker-beacond-tag "${docker_beacond_tag}" \
+				--docker-berareth-tag "${docker_berareth_tag}"
 
-		# Step 2: Generates a eth-genesis.json file that is shared with all nodes
-		generate_eth_genesis_file \
-			--config-dir "${BERANODES_PATH}" \
-			--chain-id "${CHAIN_ID_DEVNET}" \
-			--prague1-time ${ETH_GENESIS_PRAGUE1_TIME} \
-			--prague1-base-fee-change-denominator ${ETH_GENESIS_PRAGUE1_BASE_FEE_CHANGE_DENOMINATOR} \
-			--prague1-min-base-fee ${ETH_GENESIS_PRAGUE1_MIN_BASE_FEE} \
-			--prague1-pol-distributor ${ETH_GENESIS_PRAGUE1_POL_DISTRIBUTOR} \
-			--prague2-time ${ETH_GENESIS_PRAGUE2_TIME} \
-			--prague2-min-base-fee ${ETH_GENESIS_PRAGUE2_MIN_BASE_FEE} \
-			--prague3-time ${ETH_GENESIS_PRAGUE3_TIME} \
-			--prague3-bex-vault ${ETH_GENESIS_PRAGUE3_BEX_VAULT} \
-			--prague3-rescue-address ${ETH_GENESIS_PRAGUE3_RESCUE_ADDRESS} \
-			--prague3-blocked-addresses ${ETH_GENESIS_PRAGUE3_BLOCKED_ADDRESSES} \
-			--prague4-time ${ETH_GENESIS_PRAGUE4_TIME} \
-			--eth-genesis-custom0-contract-address ${wallet_address} \
-			--eth-genesis-custom0-contract-balance ${wallet_balance}
+			local seed_dir="${BERANODES_PATH}${BERANODES_PATH_TMP}/seed-data-${chain_id}"
+			if [[ -f "${seed_dir}/genesis.json" ]]; then
+				cp -f "${seed_dir}/genesis.json" "${BERANODES_PATH}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}"
+				log_success "Official ${network} genesis.json installed"
+			else
+				log_error "Official genesis.json missing at ${seed_dir}/genesis.json"
+				return 1
+			fi
 
-		# Step X: Generate beacon-kit genesis.json, configured premined deposits and deposit storage in eth-genesis.json
-		generate_beacond_genesis_file_and_premined_deposits_storage \
-			--config-dir "${BERANODES_PATH}" \
-			--chain-spec "${network}" \
-			--mode "${mode}" \
-			--docker-beacond-tag "${docker_beacond_tag}" \
-			--docker-berareth-tag "${docker_berareth_tag}"
+			# Create per-node homes (beacond init) before extracting snapshots into them.
+			local nodes_json
+			nodes_json=$(jq -c '.nodes' "${config_json_path}")
+			local bk_spec
+			bk_spec="$(network_beacon_chain_spec "${network}")"
+			local beacond_bin="${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
+			local ni nrole nmoniker ndir
+			local ncount
+			ncount=$(echo "$nodes_json" | jq 'length')
+			for ((ni = 0; ni < ncount; ni++)); do
+				nrole=$(echo "$nodes_json" | jq -r ".[$ni].role")
+				nmoniker=$(echo "$nodes_json" | jq -r ".[$ni].moniker")
+				ndir="${BERANODES_PATH}${BERANODES_PATH_NODES}/${ni}-${nrole}"
+				mkdir -p "${ndir}/beacond" "${ndir}/bera-reth"
+				if [[ -f "${ndir}/beacond/config/config.toml" ]]; then
+					continue
+				fi
+				if [[ "${mode}" == "docker" ]]; then
+					docker run --rm -v "${ndir}/beacond":/tmp "docker-beacond:${docker_beacond_tag}" \
+						beacond init "${nmoniker}" --chain-id "${clienttoml_chain_id}" --beacon-kit.chain-spec "${bk_spec}" --home /tmp >/dev/null 2>&1 || {
+						log_error "Failed to initialize beacond home for node ${ni}"
+						return 1
+					}
+				else
+					"${beacond_bin}" init "${nmoniker}" --chain-id "${clienttoml_chain_id}" --beacon-kit.chain-spec "${bk_spec}" --home "${ndir}/beacond" >/dev/null 2>&1 || {
+						log_error "Failed to initialize beacond home for node ${ni}"
+						return 1
+					}
+				fi
+				if [[ -f "${BERANODES_PATH}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}" ]]; then
+					cp -f "${BERANODES_PATH}${BERANODES_PATH_TMP}/${GENESIS_BEACON_NAME_DEFAULT}" "${ndir}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
+				fi
+				if [[ -f "${BERANODES_PATH}${BERANODES_PATH_TMP}/kzg-trusted-setup.json" ]]; then
+					cp -f "${BERANODES_PATH}${BERANODES_PATH_TMP}/kzg-trusted-setup.json" "${ndir}/beacond/config/kzg-trusted-setup.json"
+				fi
+			done
+
+			if [[ "${skip_snapshot}" == true ]]; then
+				log_warn "Skipping snapshots (--skip-snapshot). Nodes will sync from the public network, which is slow."
+			else
+				print_header "Downloading and restoring official snapshots"
+				apply_network_snapshots "${network}" "${BERANODES_PATH}" "${nodes_json}" "${snapshot_type}" "false" || return 1
+			fi
+		else
+			# Step 1: Generate base beranodes.config.json file
+			generate_base_beacond_config \
+				--config-dir "${BERANODES_PATH}" \
+				--chain-spec "${network}" \
+				--mode "${mode}" \
+				--docker-beacond-tag "${docker_beacond_tag}" \
+				--docker-berareth-tag "${docker_berareth_tag}"
+
+			# Step 2: Generates a eth-genesis.json file that is shared with all nodes
+			generate_eth_genesis_file \
+				--config-dir "${BERANODES_PATH}" \
+				--chain-id "${CHAIN_ID_DEVNET}" \
+				--prague1-time ${ETH_GENESIS_PRAGUE1_TIME} \
+				--prague1-base-fee-change-denominator ${ETH_GENESIS_PRAGUE1_BASE_FEE_CHANGE_DENOMINATOR} \
+				--prague1-min-base-fee ${ETH_GENESIS_PRAGUE1_MIN_BASE_FEE} \
+				--prague1-pol-distributor ${ETH_GENESIS_PRAGUE1_POL_DISTRIBUTOR} \
+				--prague2-time ${ETH_GENESIS_PRAGUE2_TIME} \
+				--prague2-min-base-fee ${ETH_GENESIS_PRAGUE2_MIN_BASE_FEE} \
+				--prague3-time ${ETH_GENESIS_PRAGUE3_TIME} \
+				--prague3-bex-vault ${ETH_GENESIS_PRAGUE3_BEX_VAULT} \
+				--prague3-rescue-address ${ETH_GENESIS_PRAGUE3_RESCUE_ADDRESS} \
+				--prague3-blocked-addresses ${ETH_GENESIS_PRAGUE3_BLOCKED_ADDRESSES} \
+				--prague4-time ${ETH_GENESIS_PRAGUE4_TIME} \
+				--eth-genesis-custom0-contract-address ${wallet_address} \
+				--eth-genesis-custom0-contract-balance ${wallet_balance}
+
+			# Step X: Generate beacon-kit genesis.json, configured premined deposits and deposit storage in eth-genesis.json
+			generate_beacond_genesis_file_and_premined_deposits_storage \
+				--config-dir "${BERANODES_PATH}" \
+				--chain-spec "${network}" \
+				--mode "${mode}" \
+				--docker-beacond-tag "${docker_beacond_tag}" \
+				--docker-berareth-tag "${docker_berareth_tag}"
+		fi
 	fi
 }

@@ -16,7 +16,8 @@
 fetch_github_release() {
 	local release_url="$1"
 
-	log_info "Checking binary from: $release_url"
+	# Logs must go to stderr: callers capture stdout as the JSON body.
+	log_info "Checking binary from: $release_url" >&2
 
 	# Check if the URL doesn't return a 404 before using it
 	local response=$(curl -s -w "\n%{http_code}" "$release_url")
@@ -29,19 +30,19 @@ fetch_github_release() {
 	fi
 
 	# Check if the response is valid JSON (for GitHub API)
-	if ! echo "$response_body" | jq . >/dev/null 2>&1; then
+	if ! printf '%s\n' "$response_body" | jq . >/dev/null 2>&1; then
 		log_error "Response from $release_url is not valid JSON."
 		return 1
 	fi
 
-	local version=$(echo "$response_body" | jq -r '.tag_name')
+	local version=$(printf '%s\n' "$response_body" | jq -r '.tag_name')
 	if [[ "$version" == "null" ]]; then
 		log_error "Failed to get version from response"
 		return 1
 	fi
 
-	log_info "Using version: $version"
-	echo "$response_body"
+	log_info "Using version: $version" >&2
+	printf '%s\n' "$response_body"
 	return 0
 }
 
@@ -74,8 +75,60 @@ detect_platform_arch() {
 }
 
 ################################################################################
+# Helper: release_asset_name_patterns
+# Description: Asset-name substrings for a CLI platform arch.
+#              beacond (Go) uses GOOS-GOARCH (darwin-arm64, linux-amd64).
+#              bera-reth (Rust) uses cargo target triples
+#              (aarch64-apple-darwin, x86_64-unknown-linux-gnu).
+#
+# Arguments:
+#   $1 - arch: Architecture string from detect_platform_arch
+#
+# Returns:
+#   0 - Success (prints space-separated substrings, Go-style first)
+################################################################################
+release_asset_name_patterns() {
+	local arch="$1"
+
+	case "$arch" in
+	darwin-arm64)
+		echo "darwin-arm64 aarch64-apple-darwin"
+		;;
+	linux-arm64)
+		echo "linux-arm64 aarch64-unknown-linux-gnu"
+		;;
+	linux-amd64)
+		echo "linux-amd64 x86_64-unknown-linux-gnu"
+		;;
+	*)
+		echo "$arch"
+		;;
+	esac
+	return 0
+}
+
+################################################################################
+# Helper: isolate_json_object
+# Description: Returns the first JSON object in a payload. Callers that capture
+#              fetch_github_release may prefix the body with [INFO] log lines;
+#              jq then treats "[INFO]" as an array and fails with
+#              "Invalid numeric literal at line 1, column 2".
+################################################################################
+isolate_json_object() {
+	local payload="$1"
+
+	if [[ "$payload" == *"{"* ]]; then
+		printf '%s\n' "${payload#"${payload%%\{*}"}"
+	else
+		printf '%s\n' "$payload"
+	fi
+}
+
+################################################################################
 # Helper: extract_download_url
-# Description: Extracts binary download URL from GitHub release response
+# Description: Extracts binary download URL from GitHub release response.
+#              Matches both Go (darwin-arm64) and Rust (aarch64-apple-darwin)
+#              asset naming conventions used by beacond and bera-reth.
 #
 # Arguments:
 #   $1 - response_body: GitHub API response JSON
@@ -88,16 +141,24 @@ detect_platform_arch() {
 extract_download_url() {
 	local response_body="$1"
 	local arch="$2"
+	local pattern download_url=""
+	local json
+	json=$(isolate_json_object "$response_body")
 
-	local download_url=$(echo "$response_body" | jq -r ".assets[] | select(.name | contains(\"$arch\") and endswith(\".tar.gz\") and (contains(\".sig\") | not)) | .browser_download_url")
+	local patterns
+	patterns=$(release_asset_name_patterns "$arch")
 
-	if [[ -z "$download_url" ]]; then
-		log_error "No download URL found for the required binary for '$arch'."
-		return 1
-	fi
+	for pattern in $patterns; do
+		download_url=$(printf '%s\n' "$json" | jq -r --arg pattern "$pattern" \
+			'[.assets[]? | select(.name | type == "string" and contains($pattern) and endswith(".tar.gz")) | .browser_download_url][0] // empty' 2>/dev/null) || download_url=""
+		if [[ -n "$download_url" && "$download_url" != "null" ]]; then
+			printf '%s\n' "$download_url"
+			return 0
+		fi
+	done
 
-	echo "$download_url"
-	return 0
+	log_error "No download URL found for the required binary for '$arch'."
+	return 1
 }
 
 ################################################################################
@@ -138,13 +199,43 @@ download_and_extract_binary() {
 		return 1
 	fi
 
-	# Rename the extracted file to the binary name
-	local file_name="${tar_file_name%.tar.gz}"
-	mv "${bin_dir}/${file_name}" "${bin_dir}/${binary_name}"
+	install_extracted_binary "$bin_dir" "$binary_name" "$tar_file_name" || return 1
 
-	# Set executable permissions
-	chmod +x "${bin_dir}/${binary_name}"
+	return 0
+}
 
+################################################################################
+# Helper: install_extracted_binary
+# Description: Moves an extracted release binary into place.
+#              beacond archives contain a file named like the tarball stem
+#              (beacond-v1.4.1-darwin-arm64). bera-reth archives contain a
+#              file named bera-reth (the cargo binary).
+#
+# Arguments:
+#   $1 - bin_dir: Directory the tarball was extracted into
+#   $2 - binary_name: Expected final binary name
+#   $3 - tar_file_name: Original tarball filename
+#
+# Returns:
+#   0 - Success
+#   1 - Failure (extracted binary not found)
+################################################################################
+install_extracted_binary() {
+	local bin_dir="$1"
+	local binary_name="$2"
+	local tar_file_name="$3"
+	local dest_path="${bin_dir}/${binary_name}"
+	local archive_stem="${tar_file_name%.tar.gz}"
+	local named_like_archive="${bin_dir}/${archive_stem}"
+
+	if [[ -f "$named_like_archive" ]]; then
+		mv -f "$named_like_archive" "$dest_path"
+	elif [[ ! -f "$dest_path" ]]; then
+		log_error "Failed to locate extracted binary '${binary_name}' in ${bin_dir}"
+		return 1
+	fi
+
+	chmod +x "$dest_path"
 	return 0
 }
 
@@ -170,9 +261,14 @@ verify_binary() {
 		return 1
 	fi
 
-	local binary_version=$("$binary_path" $version_flag 2>&1)
-	if [[ -z "$binary_version" ]]; then
-		log_error "Failed to get version from ${binary_name}."
+	local binary_version
+	local exit_code
+	binary_version=$("$binary_path" $version_flag 2>&1) || exit_code=$?
+	exit_code=${exit_code:-0}
+
+	if [[ $exit_code -ne 0 ]] || [[ -z "$binary_version" ]]; then
+		log_warn "Binary ${binary_name} exists but could not execute (exit code: ${exit_code})."
+		log_warn "This may be a cross-platform binary (e.g., Linux binary on macOS)."
 		return 1
 	fi
 
@@ -234,8 +330,8 @@ download_beranodes_binary() {
 		--version-tag)
 			if [[ -n "$2" ]]; then
 				check_version_tag="$2"
-				if [[ ! "$check_version_tag" =~ ^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+(\.[0-9]+)?)?)$ ]]; then
-					log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc<N>) (e.g., latest, v0.9.0, v0.9.0-rc2)"
+				if [[ ! "$check_version_tag" =~ $VERSION_TAG_REGEX ]]; then
+			log_error "--version-tag must match format (latest or v<MAJ>.<MIN>.<PATCH> or v<MAJ>.<MIN>.<PATCH>-rc.N) (e.g., latest, v0.9.0, v1.4.2-rc.0)"
 					return 1
 				fi
 				version_tag="$check_version_tag"
@@ -285,15 +381,173 @@ download_beranodes_binary() {
 
 	# Step 3: Extract download URL
 	local download_url
-	download_url=$(extract_download_url "$response_body" "$arch") || return 1
+	if download_url=$(extract_download_url "$response_body" "$arch"); then
+		# Step 4: Download and extract binary
+		download_and_extract_binary "$download_url" "$bin_dir" "$binary_to_download" || return 1
 
-	# Step 4: Download and extract binary
-	download_and_extract_binary "$download_url" "$bin_dir" "$binary_to_download" || return 1
-
-	# Step 5: Verify binary is executable
-	verify_binary "${bin_dir}/${binary_to_download}" "$version_cmd_flag" || return 1
+		# Step 5: Verify binary is executable
+		verify_binary "${bin_dir}/${binary_to_download}" "$version_cmd_flag" || return 1
+	else
+		# Fallback: No pre-built binary available for this platform.
+		# Build from source targeting the native OS/architecture.
+		log_warn "No pre-built binary available for '${arch}'. Building from source..."
+		build_binary_from_source "$binary_to_download" "$bin_dir" "$version_tag" || return 1
+	fi
 
 	return 0
+}
+
+################################################################################
+# Helper: build_binary_from_source
+# Description: Builds a native binary from source inside Docker when no
+#              pre-built binary is available for the current platform.
+#
+#              Uses cross-compilation Dockerfile templates that clone the
+#              source repo and build targeting the host OS/architecture:
+#                - beacond (Go):    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
+#                - bera-reth (Rust): cargo-zigbuild --target aarch64-apple-darwin
+#
+#              The built binary is extracted via 'docker cp' and verified
+#              on the host. Build images are cached for faster rebuilds.
+#
+# Arguments:
+#   $1 - binary_to_download: Binary name (BIN_BERARETH or BIN_BEACONKIT)
+#   $2 - bin_dir: Destination directory for the built binary
+#   $3 - version_tag: Version tag (e.g., "latest", "v1.3.1")
+#
+# Returns:
+#   0 - Success
+#   1 - Failure
+################################################################################
+build_binary_from_source() {
+	local binary_to_download="$1"
+	local bin_dir="$2"
+	local version_tag="${3:-latest}"
+
+	# ── Step 1: Check Docker is available ─────────────────────────────────
+	if ! command -v docker &>/dev/null; then
+		log_error "Docker is required to build binaries from source."
+		log_error "Please install Docker: https://docs.docker.com/get-docker/"
+		return 1
+	fi
+
+	if ! docker info &>/dev/null; then
+		log_error "Docker daemon is not running. Please start Docker and try again."
+		return 1
+	fi
+
+	# ── Step 2: Determine build configuration ─────────────────────────────
+	local github_repo=""
+	local dockerfile_template=""
+	local build_arg_name=""
+	local build_image_name=""
+	local binary_path_in_image="/usr/local/bin/${binary_to_download}"
+	local version_cmd_flag=""
+
+	if [[ "$binary_to_download" == "$BIN_BEACONKIT" ]]; then
+		github_repo="berachain/beacon-kit"
+		dockerfile_template="scripts/Dockerfile.beacond.darwin-arm64.template"
+		build_arg_name="BEACON_KIT_TAG"
+		build_image_name="beranode-builder-beacond-darwin-arm64"
+		version_cmd_flag="version"
+	elif [[ "$binary_to_download" == "$BIN_BERARETH" ]]; then
+		github_repo="berachain/bera-reth"
+		dockerfile_template="scripts/Dockerfile.berareth.darwin-arm64.template"
+		build_arg_name="BERA_RETH_TAG"
+		build_image_name="beranode-builder-bera-reth-darwin-arm64"
+		version_cmd_flag="--version"
+	else
+		log_error "Unsupported binary for source build: ${binary_to_download}"
+		return 1
+	fi
+
+	# Verify the Dockerfile template exists
+	if [[ ! -f "$dockerfile_template" ]]; then
+		log_error "Cross-compilation Dockerfile not found: ${dockerfile_template}"
+		log_error "Make sure you are running beranode from the project root directory."
+		return 1
+	fi
+
+	# ── Step 3: Resolve version tag ───────────────────────────────────────
+	local resolved_tag="${version_tag}"
+	if [[ "$resolved_tag" == "latest" ]]; then
+		log_info "Resolving latest release tag for ${github_repo}..."
+		resolved_tag=$(curl --silent "https://api.github.com/repos/${github_repo}/releases/latest" \
+			| grep -o '"tag_name": *"v[^"]*"' | head -1 | cut -d'"' -f4)
+		if [[ -z "$resolved_tag" ]]; then
+			log_error "Failed to fetch latest release tag from GitHub for ${github_repo}."
+			return 1
+		fi
+		log_info "Latest release: ${resolved_tag}"
+	fi
+
+	# ── Step 4: Check if build image already exists (cached) ──────────────
+	local existing_image
+	existing_image=$(docker images --format '{{.Repository}}:{{.Tag}}' \
+		| grep "^${build_image_name}:${resolved_tag}$" 2>/dev/null || true)
+
+	if [[ -n "$existing_image" ]]; then
+		log_success "Found cached build image: ${existing_image}"
+		log_info "Skipping build — extracting binary from cached image."
+	else
+		# ── Step 5: Build the Docker image ────────────────────────────────
+		log_info "Building ${binary_to_download} for darwin-arm64 inside Docker..."
+		log_warn "This may take several minutes (first build only — subsequent builds are cached)."
+
+		local build_start_time
+		build_start_time=$(date +%s)
+
+		if ! docker build \
+			-f "${dockerfile_template}" \
+			--build-arg "${build_arg_name}=${resolved_tag}" \
+			-t "${build_image_name}:${resolved_tag}" \
+			. 2>&1; then
+			log_error "Docker build failed for ${binary_to_download} (darwin-arm64)."
+			log_error "Check the build output above for details."
+			return 1
+		fi
+
+		local build_end_time
+		build_end_time=$(date +%s)
+		local build_duration=$(( build_end_time - build_start_time ))
+		log_success "Docker build completed in ${build_duration}s"
+	fi
+
+	# ── Step 6: Extract binary from the build image ───────────────────────
+	ensure_dir_exists "$bin_dir" "binary directory: $bin_dir"
+
+	local container_name="beranode-build-extract-${binary_to_download}-$$"
+	local dest_path="${bin_dir}/${binary_to_download}"
+
+	log_info "Extracting ${binary_to_download} from build image..."
+
+	if ! docker create --name "${container_name}" "${build_image_name}:${resolved_tag}" /bin/true &>/dev/null; then
+		log_error "Failed to create temporary container from ${build_image_name}:${resolved_tag}"
+		return 1
+	fi
+
+	if docker cp "${container_name}:${binary_path_in_image}" "${dest_path}"; then
+		log_success "Extracted ${binary_to_download} to ${dest_path}"
+	else
+		log_error "Failed to extract binary from build image."
+		docker rm "${container_name}" &>/dev/null || true
+		return 1
+	fi
+
+	# Clean up temporary container (keep the image for caching)
+	docker rm "${container_name}" &>/dev/null || true
+
+	# ── Step 7: Verify the built binary on the host ───────────────────────
+	chmod +x "${dest_path}"
+
+	if verify_binary "${dest_path}" "${version_cmd_flag}"; then
+		log_success "Binary '${binary_to_download}' built and verified for darwin-arm64."
+		return 0
+	else
+		log_error "Built binary '${binary_to_download}' failed verification on this platform."
+		log_error "The cross-compiled binary may not be compatible. Check build output for errors."
+		return 1
+	fi
 }
 
 download_beranodes_docker_image() {

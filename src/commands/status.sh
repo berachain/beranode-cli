@@ -12,6 +12,8 @@ set -euo pipefail
 #   - Execution Layer (bera-reth): block height and peer count via JSON-RPC
 #   - Consensus Layer (beacond): sync status, block height, block time,
 #     peer count, and catching-up flag via CometBFT HTTP RPC
+#   - Public EL RPC (LIVE EL BLOCK): chain tip from the official RPC for
+#     bepolia/mainnet only (omitted on devnet), refreshed every 10 seconds
 #   - Docker container status (when running in docker mode)
 #
 # VERSION CONTEXT - Beranode CLI v0.9.0
@@ -22,9 +24,11 @@ set -euo pipefail
 #    └─ show_status_help()        : Display usage information
 #
 # [SECTION 2] Status Query Helpers
-#    └─ query_el_block()          : Query EL for latest block number
+#    └─ query_el_rpc_block()      : Query any EL JSON-RPC URL for block number
+#    └─ query_el_block()          : Query local EL for latest block number
 #    └─ query_el_peers()          : Query EL for peer count
 #    └─ query_cl_status()         : Query CL for sync info + peer count
+#    └─ refresh_live_el_block()   : Refresh cached public-RPC block (every 10s)
 #    └─ get_docker_container_status() : Query Docker container state
 #    └─ format_block_age()        : Human-readable time since latest CL block
 #    └─ colorize_status()         : Apply ANSI color to a status string
@@ -56,7 +60,8 @@ Display the live status of all Berachain nodes defined in the configuration.
 
 Reads beranodes.config.json and queries each node's Execution Layer (bera-reth)
 and Consensus Layer (beacond) endpoints to report block height, peer count,
-sync status, and more.
+sync status, and more. For bepolia/mainnet, also queries the public RPC for
+LIVE EL BLOCK (refreshed every 10 seconds in --watch mode).
 
 Options:
   --verbose|-v              Show each service (beacond, bera-reth) as its own row
@@ -82,21 +87,23 @@ EOF
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Function: query_el_block
-# Description: Queries the Execution Layer (bera-reth) for the current block
-#              number via eth_blockNumber JSON-RPC call.
+# Function: query_el_rpc_block
+# Description: Queries an Execution Layer JSON-RPC URL for the current block
+#              number via eth_blockNumber.
 # Arguments:
-#   $1 - port (integer): The EL HTTP RPC port (el_ethrpc_port)
+#   $1 - url (string): Full JSON-RPC URL (local or public)
 # Returns:
 #   Prints the hex block number on success, or "--" on failure
 # -----------------------------------------------------------------------------
-query_el_block() {
-	local port="$1"
+query_el_rpc_block() {
+	local url="$1"
+	[[ -z "${url}" ]] && { echo "--"; return; }
+
 	local response
 	response=$(curl -sf --connect-timeout 2 --max-time 3 \
 		-X POST -H 'Content-Type: application/json' \
 		-d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
-		"http://localhost:${port}" 2>/dev/null) || { echo "--"; return; }
+		"${url}" 2>/dev/null) || { echo "--"; return; }
 
 	local result
 	result=$(echo "${response}" | jq -r '.result // empty' 2>/dev/null) || { echo "--"; return; }
@@ -106,6 +113,62 @@ query_el_block() {
 	else
 		echo "--"
 	fi
+}
+
+# -----------------------------------------------------------------------------
+# Function: query_el_block
+# Description: Queries the local Execution Layer (bera-reth) for the current
+#              block number via eth_blockNumber JSON-RPC call.
+# Arguments:
+#   $1 - port (integer): The EL HTTP RPC port (el_ethrpc_port)
+# Returns:
+#   Prints the hex block number on success, or "--" on failure
+# -----------------------------------------------------------------------------
+query_el_block() {
+	query_el_rpc_block "http://localhost:${1}"
+}
+
+# -----------------------------------------------------------------------------
+# Function: refresh_live_el_block
+# Description: Re-reads `network` from beranodes.config.json and queries the
+#              matching public EL RPC for the chain tip. Cached for
+#              LIVE_EL_REFRESH_SECONDS (10s) so --watch does not hammer the
+#              public endpoint on every table refresh.
+# Caller-scoped (cmd_status locals):
+#   config_path, network, live_el_block, live_el_fetched_at, show_live_el
+# -----------------------------------------------------------------------------
+refresh_live_el_block() {
+	# Re-read network every frame so a mid-watch switch to/from devnet
+	# immediately shows or hides the LIVE EL BLOCK column.
+	if [[ -n "${config_path:-}" && -f "${config_path}" ]]; then
+		network=$(jq -r '.network // "unknown"' "${config_path}") || true
+	fi
+
+	local rpc_url
+	rpc_url=$(network_public_el_rpc "${network}")
+	if [[ -z "${rpc_url}" ]]; then
+		live_el_block="--"
+		show_live_el="false"
+		return 0
+	fi
+	show_live_el="true"
+
+	local now
+	now=$(date +%s 2>/dev/null) || now=0
+
+	if [[ ${live_el_fetched_at} -gt 0 && ${now} -gt 0 ]]; then
+		local elapsed=$(( now - live_el_fetched_at ))
+		if [[ ${elapsed} -lt ${LIVE_EL_REFRESH_SECONDS} ]]; then
+			return 0
+		fi
+	fi
+
+	local result
+	result=$(query_el_rpc_block "${rpc_url}")
+	if [[ "${result}" != "--" ]]; then
+		live_el_block=$(hex_to_dec "${result}")
+	fi
+	live_el_fetched_at=${now}
 }
 
 # -----------------------------------------------------------------------------
@@ -317,14 +380,19 @@ colorize_catching_up() {
 # Function: print_status_row
 # Description: Prints a single row of the compact status table (default mode).
 # Arguments:
-#   $1  - node_name     $2  - role        $3  - el_status
-#   $4  - el_block      $5  - el_peers    $6  - cl_status
-#   $7  - cl_block      $8  - cl_peers    $9  - catching_up
-#   $10 - block_age
+#   $1  - node_name     $2  - role           $3  - el_status
+#   $4  - el_block      $5  - live_el_block  $6  - el_peers
+#   $7  - cl_status     $8  - cl_block       $9  - cl_peers
+#   $10 - catching_up   $11 - block_age
 # -----------------------------------------------------------------------------
 print_status_row() {
-	printf "  %-28s %-12s %-12s %-12s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
-		"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
+	if [[ "${show_live_el:-false}" == "true" ]]; then
+		printf "  %-28s %-12s %-12s %-12s %-14s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}"
+	else
+		printf "  %-28s %-12s %-12s %-12s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
+	fi
 }
 
 # -----------------------------------------------------------------------------
@@ -332,11 +400,17 @@ print_status_row() {
 # Description: Prints a single row of the verbose status table.
 # Arguments:
 #   $1 - node_name  $2 - role    $3 - service   $4 - status
-#   $5 - block      $6 - peers   $7 - catching_up  $8 - block_age
+#   $5 - block      $6 - live_block  $7 - peers
+#   $8 - catching_up  $9 - block_age
 # -----------------------------------------------------------------------------
 print_verbose_row() {
-	printf "  %-28s %-12s %-14s %-12s %-14s %-10s %-12s %-14s\n" \
-		"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+	if [[ "${show_live_el:-false}" == "true" ]]; then
+		printf "  %-28s %-12s %-14s %-12s %-14s %-14s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+	else
+		printf "  %-28s %-12s %-14s %-12s %-14s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+	fi
 }
 
 # =============================================================================
@@ -347,10 +421,13 @@ print_verbose_row() {
 #
 # Arguments (via caller-scoped locals):
 #   config_path, network, moniker, mode, total_nodes, chain_id,
-#   nodes_json, nodes_count, verbose, watch_mode
+#   nodes_json, nodes_count, verbose, watch_mode,
+#   live_el_block, live_el_fetched_at, show_live_el
 # =============================================================================
 
 render_status_table() {
+	refresh_live_el_block
+
 	# -------------------------------------------------------------------------
 	# Print header
 	# -------------------------------------------------------------------------
@@ -365,11 +442,21 @@ render_status_table() {
 	# Print table header
 	# -------------------------------------------------------------------------
 	if [[ "${verbose}" == "true" ]]; then
-		print_verbose_row "NODE" "ROLE" "SERVICE" "STATUS" "BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
-		echo -e "  ${DIM}$(printf '%.0s─' {1..118})${RESET}"
+		if [[ "${show_live_el}" == "true" ]]; then
+			print_verbose_row "NODE" "ROLE" "SERVICE" "STATUS" "BLOCK" "LIVE EL BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..133})${RESET}"
+		else
+			print_verbose_row "NODE" "ROLE" "SERVICE" "STATUS" "BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..118})${RESET}"
+		fi
 	else
-		print_status_row "NODE" "ROLE" "EL STATUS" "EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
-		echo -e "  ${DIM}$(printf '%.0s─' {1..136})${RESET}"
+		if [[ "${show_live_el}" == "true" ]]; then
+			print_status_row "NODE" "ROLE" "EL STATUS" "EL BLOCK" "LIVE EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..151})${RESET}"
+		else
+			print_status_row "NODE" "ROLE" "EL STATUS" "EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..136})${RESET}"
+		fi
 	fi
 
 	# -------------------------------------------------------------------------
@@ -466,22 +553,39 @@ render_status_table() {
 			# -- bera-reth row --
 			el_status_display=$(colorize_status "${el_status}" 12)
 
-			printf "  %-28s %-12s %-14s %b %-14s %-10s %-12s %-14s\n" \
-				"${node_moniker}" "${node_role}" "bera-reth" \
-				"${el_status_display}" "${el_block}" "${el_peers}" "--" "--"
+			if [[ "${show_live_el}" == "true" ]]; then
+				printf "  %-28s %-12s %-14s %b %-14s %-14s %-10s %-12s %-14s\n" \
+					"${node_moniker}" "${node_role}" "bera-reth" \
+					"${el_status_display}" "${el_block}" "${live_el_block}" "${el_peers}" "--" "--"
+			else
+				printf "  %-28s %-12s %-14s %b %-14s %-10s %-12s %-14s\n" \
+					"${node_moniker}" "${node_role}" "bera-reth" \
+					"${el_status_display}" "${el_block}" "${el_peers}" "--" "--"
+			fi
 
 			# -- beacond row (continuation — no node/role repeated) --
 			cl_status_display=$(colorize_status "${cl_status}" 12)
 			catching_display=$(colorize_catching_up "${catching_up}" 12)
 
-			printf "  %-28s %-12s %-14s %b %-14s %-10s %b %-14s\n" \
-				"" "" "beacond" \
-				"${cl_status_display}" "${cl_block}" "${cl_peers}" \
-				"${catching_display}" "${block_age}"
+			if [[ "${show_live_el}" == "true" ]]; then
+				printf "  %-28s %-12s %-14s %b %-14s %-14s %-10s %b %-14s\n" \
+					"" "" "beacond" \
+					"${cl_status_display}" "${cl_block}" "--" "${cl_peers}" \
+					"${catching_display}" "${block_age}"
+			else
+				printf "  %-28s %-12s %-14s %b %-14s %-10s %b %-14s\n" \
+					"" "" "beacond" \
+					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
+					"${catching_display}" "${block_age}"
+			fi
 
 			# Separator between nodes
 			if [[ $((i + 1)) -lt ${nodes_count} ]]; then
-				echo -e "  ${DIM}$(printf '%.0s·' {1..118})${RESET}"
+				if [[ "${show_live_el}" == "true" ]]; then
+					echo -e "  ${DIM}$(printf '%.0s·' {1..133})${RESET}"
+				else
+					echo -e "  ${DIM}$(printf '%.0s·' {1..118})${RESET}"
+				fi
 			fi
 		else
 			# =============================================================
@@ -494,11 +598,19 @@ render_status_table() {
 			catching_display=$(colorize_catching_up "${catching_up}" 12)
 
 			# Print the row — colored fields already include their padding
-			printf "  %-28s %-12s %b %-12s %-10s %b %-12s %-10s %b %-14s\n" \
-				"${node_moniker}" "${node_role}" \
-				"${el_status_display}" "${el_block}" "${el_peers}" \
-				"${cl_status_display}" "${cl_block}" "${cl_peers}" \
-				"${catching_display}" "${block_age}"
+			if [[ "${show_live_el}" == "true" ]]; then
+				printf "  %-28s %-12s %b %-12s %-14s %-10s %b %-12s %-10s %b %-14s\n" \
+					"${node_moniker}" "${node_role}" \
+					"${el_status_display}" "${el_block}" "${live_el_block}" "${el_peers}" \
+					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
+					"${catching_display}" "${block_age}"
+			else
+				printf "  %-28s %-12s %b %-12s %-10s %b %-12s %-10s %b %-14s\n" \
+					"${node_moniker}" "${node_role}" \
+					"${el_status_display}" "${el_block}" "${el_peers}" \
+					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
+					"${catching_display}" "${block_age}"
+			fi
 		fi
 	done
 
@@ -590,6 +702,12 @@ cmd_status() {
 		return 0
 	fi
 
+	# Cached public-RPC tip; refresh_live_el_block updates these every 10s.
+	# show_live_el is false on devnet (column omitted) and true on bepolia/mainnet.
+	local live_el_block="--"
+	local live_el_fetched_at=0
+	local show_live_el="false"
+
 	# -------------------------------------------------------------------------
 	# [STEP 3] Render — once or in a loop
 	# -------------------------------------------------------------------------
@@ -618,7 +736,11 @@ cmd_status() {
 			# Footer
 			local now_ts
 			now_ts=$(date '+%H:%M:%S')
-			echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Press Ctrl+C to exit${RESET}"
+			if [[ "${show_live_el}" == "true" ]]; then
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  LIVE EL BLOCK every ${LIVE_EL_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
+			else
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Press Ctrl+C to exit${RESET}"
+			fi
 			echo ""
 
 			# Clear any leftover lines below the current cursor position

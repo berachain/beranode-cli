@@ -18,6 +18,7 @@
 #   Test 13: EL block shown as decimal
 #   Test 14: --watch/--interval flag parsing
 #   Test 15: --help mentions watch/interval
+#   Test 16: LIVE EL BLOCK column (bepolia/mainnet only; omitted on devnet)
 #
 # Usage: ./tests/test_status.sh
 # =============================================================================
@@ -405,6 +406,12 @@ else
     fail_test "--help missing --interval option"
 fi
 
+if echo "$output" | grep -q "LIVE EL BLOCK"; then
+    pass_test "--help mentions LIVE EL BLOCK"
+else
+    fail_test "--help missing LIVE EL BLOCK"
+fi
+
 # ─── Test 6: Missing config file ────────────────────────────────────────────
 log_header "Test 6: Missing config file error handling"
 
@@ -697,6 +704,78 @@ if echo "$output" | grep -qi "interactive\|tty\|terminal"; then
 else
     fail_test "-w flag not recognized"
 fi
+
+# ─── Test 16: LIVE EL BLOCK column ──────────────────────────────────────────
+log_header "Test 16: LIVE EL BLOCK column"
+
+# Devnet omits LIVE EL BLOCK entirely (no public RPC)
+TEST16_DIR=$(mktemp -d)
+create_test_config "${TEST16_DIR}" "local" 1 0
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST16_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep -q "LIVE EL BLOCK"; then
+    fail_test "Devnet status should omit LIVE EL BLOCK column"
+else
+    pass_test "Devnet omits LIVE EL BLOCK column"
+fi
+
+if echo "$output" | grep -q "EL BLOCK.*EL PEERS"; then
+    pass_test "Devnet compact header is EL BLOCK | EL PEERS (no live column)"
+else
+    fail_test "Devnet compact header missing EL BLOCK | EL PEERS"
+fi
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --verbose --beranodes-dir "${TEST16_DIR}" 2>&1) || true
+if echo "$output" | grep -q "LIVE EL BLOCK"; then
+    fail_test "Devnet verbose status should omit LIVE EL BLOCK column"
+else
+    pass_test "Devnet verbose omits LIVE EL BLOCK column"
+fi
+
+rm -rf "${TEST16_DIR}"
+
+# Bepolia: LIVE EL BLOCK column is present; value comes from public RPC
+TEST16B_DIR=$(mktemp -d)
+create_test_config "${TEST16B_DIR}" "local" 1 0
+jq '.network = "bepolia"' "${TEST16B_DIR}/beranodes.config.json" > "${TEST16B_DIR}/beranodes.config.json.tmp"
+mv "${TEST16B_DIR}/beranodes.config.json.tmp" "${TEST16B_DIR}/beranodes.config.json"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST16B_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep -q "LIVE EL BLOCK"; then
+    pass_test "Bepolia compact header has LIVE EL BLOCK column"
+else
+    fail_test "Bepolia compact header missing LIVE EL BLOCK column"
+fi
+
+if echo "$output" | grep -q "EL BLOCK.*LIVE EL BLOCK.*EL PEERS"; then
+    pass_test "Bepolia column order is EL BLOCK | LIVE EL BLOCK | EL PEERS"
+else
+    fail_test "Bepolia column order is not EL BLOCK | LIVE EL BLOCK | EL PEERS"
+fi
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --verbose --beranodes-dir "${TEST16B_DIR}" 2>&1) || true
+if echo "$output" | grep -q "LIVE EL BLOCK"; then
+    pass_test "Bepolia verbose header has LIVE EL BLOCK column"
+else
+    fail_test "Bepolia verbose header missing LIVE EL BLOCK column"
+fi
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST16B_DIR}" 2>&1) || true
+if echo "$output" | grep "test-node-val-0" | grep -qE '[0-9]{4,}'; then
+    pass_test "Bepolia LIVE EL BLOCK is a public-RPC decimal"
+elif curl -sf --connect-timeout 2 --max-time 3 \
+    -X POST -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+    "https://bepolia.rpc.berachain.com" >/dev/null 2>&1; then
+    fail_test "Bepolia LIVE EL BLOCK should be a decimal from the public RPC"
+else
+    pass_test "Skipped bepolia public-RPC assertion (endpoint unreachable)"
+fi
+
+rm -rf "${TEST16B_DIR}"
 
 # =============================================================================
 # Summary

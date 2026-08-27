@@ -1155,6 +1155,7 @@ generate_base_beacond_config() {
 	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 	local docker_beacond_tag=""
 	local docker_berareth_tag=""
+	local beacond_chain_spec="${BEACON_CHAIN_SPEC_DEVNET}"
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -1179,6 +1180,7 @@ generate_base_beacond_config() {
 				echo "Unknown chain spec: ${chain_spec}"
 				return 1
 			fi
+			beacond_chain_spec="$(network_beacon_chain_spec "${chain_spec}")"
 			shift 2
 			;;
 		--mode)
@@ -1219,6 +1221,14 @@ generate_base_beacond_config() {
 		local beacond_binary="${config_dir}/bin/beacond"
 		if [[ ! -x "${beacond_binary}" ]]; then
 			log_error "beacond binary not found or not executable at: ${beacond_binary}"
+			return 1
+		fi
+
+		# Verify beacond can actually execute on this platform
+		if ! "${beacond_binary}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${beacond_binary} cannot execute on this platform."
+			log_error "The binary may be built for a different OS/architecture (e.g., Linux binary on macOS)."
+			log_error "Please rebuild with 'beranode init' or provide a native binary."
 			return 1
 		fi
 	fi
@@ -1274,9 +1284,9 @@ generate_base_beacond_config() {
 
 		mkdir -p "${config_dir}/tmp/beacond"
 		if [[ "$mode" == "docker" ]]; then
-			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp >/dev/null 2>&1
 		else
-			${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+			${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to initialize beacond node at ${config_dir}/tmp/beacond"
@@ -1320,9 +1330,9 @@ generate_base_beacond_config() {
 		fi
 
 		if [[ "$mode" == "docker" ]]; then
-			node_id=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home /tmp)
+			node_id=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond tendermint show-node-id --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp)
 		else
-			node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond)
+			node_id=$(${beacond_binary} tendermint show-node-id --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}/tmp/beacond)
 		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to read node id at ${config_dir}/tmp/beacond"
@@ -1333,9 +1343,9 @@ generate_base_beacond_config() {
 		if [[ "$role" == "validator" ]]; then
 			# Add premined deposit
 			if [[ "$mode" == "docker" ]]; then
-				docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${chain_spec} --home /tmp
+				docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp
 			else
-				${beacond_binary} genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond
+				${beacond_binary} genesis add-premined-deposit ${GENESIS_DEPOSIT_AMOUNT} "${withdraw_address}" --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}/tmp/beacond
 			fi
 			if [[ $? -ne 0 ]]; then
 				log_error "Failed to add premined deposit at ${config_dir}/tmp/beacond"
@@ -1497,6 +1507,7 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 	local chain_id=""
 	local chain_id_beacond="${CHAIN_NAME_DEVNET}-beacon-${CHAIN_ID_DEVNET}"
 	local beranode_config_file=""
+	local beacond_chain_spec="${BEACON_CHAIN_SPEC_DEVNET}"
 
 	# Parse flags
 	while [[ $# -gt 0 ]]; do
@@ -1523,6 +1534,7 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 				shift 2
 				return 1
 			fi
+			beacond_chain_spec="$(network_beacon_chain_spec "${chain_spec}")"
 			shift 2
 			;;
 		--chain-id)
@@ -1590,6 +1602,14 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 			log_error "beacond binary not found or not executable at: ${beacond_binary}"
 			return 1
 		fi
+
+		# Verify beacond can actually execute on this platform
+		if ! "${beacond_binary}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${beacond_binary} cannot execute on this platform."
+			log_error "The binary may be built for a different OS/architecture (e.g., Linux binary on macOS)."
+			log_error "Please rebuild with 'beranode init' or provide a native binary."
+			return 1
+		fi
 	fi
 
 	# Retrieve all the .nodes from the beranodes.config.json file
@@ -1652,9 +1672,9 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 
 	# beacond init
 	if [[ "$mode" == "docker" ]]; then
-		docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home /tmp >/dev/null 2>&1
+		docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp >/dev/null 2>&1
 	else
-		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
+		${beacond_binary} init ${moniker} --chain-id "${chain_id_beacond}" --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}/tmp/beacond >/dev/null 2>&1
 	fi
 	if [[ $? -ne 0 ]]; then
 		log_error "Failed to initialize beacond node at ${config_dir}${BERANODES_PATH_TMP}/beacond"
@@ -1769,9 +1789,9 @@ EOF
 		done
 
 		if [[ "$mode" == "docker" ]]; then
-			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home /tmp
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis collect-premined-deposits --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp
 		else
-			${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+			${beacond_binary} genesis collect-premined-deposits --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
 		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to collect premined deposits at ${config_dir}${BERANODES_PATH_TMP}/beacond"
@@ -1812,9 +1832,9 @@ EOF
 
 		# generate validator root
 		if [[ "$mode" == "docker" ]]; then
-			validator_root=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis validator-root /tmp/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp)
+			validator_root=$(docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis validator-root /tmp/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp)
 		else
-			validator_root=$(${beacond_binary} genesis validator-root ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond)
+			validator_root=$(${beacond_binary} genesis validator-root ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond)
 		fi
 		if [[ $? -ne 0 ]] || [[ -z "$validator_root" ]]; then
 			log_error "Failed to generate validator root at ${config_dir}${BERANODES_PATH_TMP}/beacond/config/${GENESIS_BEACON_NAME_DEFAULT}"
@@ -1834,9 +1854,9 @@ EOF
 		# set deposit storage - makes a copy of the eth-genesis.json file to ${config_dir}${BERANODES_PATH_TMP}/beacond/eth-genesis.json and modifies the 0x4242... storage slots
 		if [[ "$mode" == "docker" ]]; then
 			cp ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} ${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}
-			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis set-deposit-storage /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis set-deposit-storage /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp
 		else
-			${beacond_binary} genesis set-deposit-storage ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+			${beacond_binary} genesis set-deposit-storage ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
 		fi
 		if [[ $? -ne 0 ]] || [[ ! -f "${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}" ]]; then
 			log_error "Failed to set deposit storage at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
@@ -1858,9 +1878,9 @@ EOF
 		# execution payload
 		if [[ "$mode" == "docker" ]]; then
 			cp ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} ${config_dir}${BERANODES_PATH_TMP}/beacond/${GENESIS_ETH_NAME_DEFAULT}
-			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis execution-payload /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home /tmp
+			docker run --rm -v ${config_dir}/tmp/beacond:/tmp docker-beacond:${docker_beacond_tag} beacond genesis execution-payload /tmp/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home /tmp
 		else
-			${beacond_binary} genesis execution-payload ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
+			${beacond_binary} genesis execution-payload ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT} --beacon-kit.chain-spec ${beacond_chain_spec} --home ${config_dir}${BERANODES_PATH_TMP}/beacond
 		fi
 		if [[ $? -ne 0 ]]; then
 			log_error "Failed to set execution payload at ${config_dir}${BERANODES_PATH_TMP}/${GENESIS_ETH_NAME_DEFAULT}"
