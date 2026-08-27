@@ -198,13 +198,16 @@ modules=(
 	"lib/validation.sh"    # [4.8] Configuration validation utilities
 	"lib/genesis.sh"       # [4.9] Genesis file generation
 	"lib/download.sh"      # [4.10] Download utilities
-	"commands/common.sh"   # [4.11] Common command utilities
-	"commands/init.sh"     # [4.12] Init command implementation
-	"commands/start.sh"    # [4.13] Start command implementation
-	"commands/stop.sh"     # [4.14] Stop command implementation
-	"commands/status.sh"   # [4.15] Status command implementation
-	"commands/validate.sh" # [4.16] Validate command implementation
-	"core/dispatcher.sh"   # [4.17] Main dispatcher and entry point
+	"lib/network.sh"       # [4.11] Public-network mapping helpers
+	"lib/snapshots.sh"     # [4.12] Official snapshot download/restore
+	"commands/common.sh"   # [4.13] Common command utilities
+	"commands/init.sh"     # [4.14] Init command implementation
+	"commands/start.sh"    # [4.15] Start command implementation
+	"commands/stop.sh"     # [4.16] Stop command implementation
+	"commands/status.sh"   # [4.17] Status command implementation
+	"commands/validate.sh" # [4.18] Validate command implementation
+	"commands/snapshot.sh" # [4.19] Snapshot download/restore command
+	"core/dispatcher.sh"   # [4.20] Main dispatcher and entry point
 )
 
 # Process each module

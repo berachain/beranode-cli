@@ -26,7 +26,11 @@ jobs:
       - name: Extract changelog notes
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./scripts/bump-version.sh --notes "$VERSION" > release-notes.md
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
           if [[ ! -s release-notes.md ]]; then
             echo "Release ${GITHUB_REF_NAME}" > release-notes.md
           fi

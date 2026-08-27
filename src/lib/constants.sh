@@ -17,8 +17,8 @@ set -euo pipefail
 #   - Prague upgrade parameters (Berachain-specific)
 #
 # VERSION MANAGEMENT:
-#   The BERANODE_VERSION constant is automatically managed by
-#   scripts/bump-version.sh - do not edit manually.
+#   BERANODE_VERSION is the CLI SemVer source of truth. Update it by hand
+#   when releasing, then rebuild with build.sh and tag vX.Y.Z.
 #
 # LEGEND - Constant Categories:
 # ──────────────────────────────────────────────────────────────────────────────
@@ -69,11 +69,10 @@ set -euo pipefail
 # Variable: BERANODE_VERSION
 # Type: String (semver format: X.Y.Z)
 # Description: Current version of the Beranode CLI tool
-# Management: Automatically updated by scripts/bump-version.sh
-# WARNING: Do not manually edit this value - use bump-version.sh script
+# Management: Edit this value when releasing, then run ./build.sh
 #
-# Example: "0.6.0"
-BERANODE_VERSION="0.9.0"  # Managed by scripts/bump-version.sh - do not edit manually
+# Example: "0.9.0"
+BERANODE_VERSION="0.10.0"
 
 # =============================================================================
 # [2] PLATFORM DETECTION
@@ -167,6 +166,41 @@ readonly CHAIN_ID_TESTNET=80069
 readonly CHAIN_NAME_TESTNET="bepolia"
 readonly CHAIN_ID_MAINNET=80094
 readonly CHAIN_NAME_MAINNET="mainnet"
+
+# BeaconKit --beacon-kit.chain-spec values (distinct from network names).
+# Bepolia uses "testnet"; mainnet uses "mainnet"; local uses "devnet".
+readonly BEACON_CHAIN_SPEC_DEVNET="devnet"
+readonly BEACON_CHAIN_SPEC_TESTNET="testnet"
+readonly BEACON_CHAIN_SPEC_MAINNET="mainnet"
+
+# Official snapshot index hosts (index.csv is the stable API).
+readonly SNAPSHOT_HOST_BEPOLIA="https://bepolia.snapshots.berachain.com"
+readonly SNAPSHOT_HOST_MAINNET="https://snapshots.berachain.com"
+
+# Official public Execution Layer JSON-RPC endpoints (status LIVE EL BLOCK).
+readonly PUBLIC_EL_RPC_BEPOLIA="https://bepolia.rpc.berachain.com"
+readonly PUBLIC_EL_RPC_MAINNET="https://rpc.berachain.com"
+
+# How often `beranode status` re-reads network from beranodes.config.json
+# and queries the public EL RPC for LIVE EL BLOCK.
+readonly LIVE_EL_REFRESH_SECONDS=10
+
+# Official seed-data (genesis, KZG, EL bootnodes/peers, toml overlays).
+readonly SEED_DATA_BASE_URL="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks"
+
+# Recommended client versions per public network (docs; will drift — override with flags).
+readonly RECOMMENDED_BEACOND_VERSION_BEPOLIA="v1.4.2-rc.0"
+readonly RECOMMENDED_BERARETH_VERSION_BEPOLIA="v1.4.4"
+readonly RECOMMENDED_BEACOND_VERSION_MAINNET="v1.4.1"
+readonly RECOMMENDED_BERARETH_VERSION_MAINNET="v1.4.4"
+
+# Documented md5 checksums for seed-data files (warn on mismatch).
+readonly SEED_MD5_GENESIS_BEPOLIA="a24fb9c7ddf3ebd557300e989d44b619"
+readonly SEED_MD5_GENESIS_MAINNET="c66dbea5ee3889e1d0a11f856f1ab9f0"
+readonly SEED_MD5_KZG="5d0d482758117af8dfc20e1d52c31eef"
+
+# GitHub / CLI version tags: latest, v1.4.1, v1.4.2-rc.0, v1.4.2-rc2
+readonly VERSION_TAG_REGEX='^(latest|v\.?[0-9]+\.[0-9]+\.[0-9]+(-rc\.?[0-9]+(\.[0-9]+)?)?)$'
 
 # Variable: GENESIS_DEPOSIT_AMOUNT
 # Type: Integer (Wei denomination) - readonly
@@ -312,9 +346,9 @@ readonly RELEASE_BERARETH="https://api.github.com/repos/berachain/bera-reth"
 readonly RELEASE_BEACONKIT="https://api.github.com/repos/berachain/beacon-kit"
 
 # Variable: REPO_BEACONKIT
-# Description: GitHub raw content URL for BeaconKit test networks
-# Usage: Fetches network-specific configuration files
-readonly REPO_BEACONKIT="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks/80094"
+# Description: GitHub raw content URL for BeaconKit test networks (legacy default: mainnet 80094)
+# Usage: Prefer network_seed_data_url; kept for backward-compatible KZG fetch on devnet
+readonly REPO_BEACONKIT="${SEED_DATA_BASE_URL}/80094"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Docker Registry URLs
@@ -380,6 +414,12 @@ readonly BERANODES_PATH_NODES="/nodes"
 # Value: "/runs"
 # Contents: PID files for running nodes
 readonly BERANODES_PATH_RUNS="/runs"
+
+# Variable: BERANODES_PATH_SNAPSHOTS
+# Description: Official chain-state snapshot download directory
+# Value: "/snapshots"
+# Contents: .tar.lz4 archives plus unzipped beacond/ and reth/ trees
+readonly BERANODES_PATH_SNAPSHOTS="/snapshots"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File Names

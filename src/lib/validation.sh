@@ -270,12 +270,12 @@ validate_config_field() {
 
 	case "$field" in
 	# Empty strings or simple strings allowed for optional fields (check first!)
-	*_keyring_default_keyname | *_graffiti | *_cors_* | *_wal_dir | *_external_address | *_seeds | *_persistent_peers | *_global_labels | *_metrics_sink | *_statsd_addr | *_chain_spec_file | *_priv_validator_laddr | *_tls_*_file | *_pprof_laddr | *_grpc_*_laddr | *_unconditional_peer_ids | *_private_peer_ids | *_rpc_servers | *_trust_hash | *_temp_dir | *_psql_conn | *_grpc_address)
+	*_keyring_default_keyname | *_graffiti | *_cors_* | *_wal_dir | *_external_address | *_seeds | *_persistent_peers | *_global_labels | *_metrics_sink | *_statsd_addr | *_chain_spec_file | *_priv_validator_laddr | *_tls_*_file | *_pprof_laddr | *_grpc_*_laddr | *_unconditional_peer_ids | *_private_peer_ids | *_rpc_servers | *_trust_hash | *_temp_dir | *_psql_conn | *_grpc_address | snapshot_type)
 		return 0
 		;;
 
 	# Boolean fields (must be specific!)
-	skip_genesis | force | *_enabled | *_strict | *_unsafe | *_close_on_slow_client | *_keep_invalid_txs_in_cache | *_inter_block_cache | *_cache | *_broadcast | *_recheck | *_pex | *_seed_mode | *_disable_fastnode | *_addr_book_strict | *_allow_duplicate_ip | *_logging | apptoml_telemetry_enabled | apptoml_telemetry_enable_hostname | apptoml_telemetry_enable_hostname_label | apptoml_telemetry_enable_service_label | *_skip_timeout_commit | *_create_empty_blocks | *_discard_abci_responses | *_compact | configtoml_instrumentation_prometheus | configtoml_statesync_enable | configtoml_rpc_unsafe | configtoml_filter_peers | *_pruning_*_enabled | *_service_enabled)
+	skip_genesis | skip_snapshot | force | *_enabled | *_strict | *_unsafe | *_close_on_slow_client | *_keep_invalid_txs_in_cache | *_inter_block_cache | *_cache | *_broadcast | *_recheck | *_pex | *_seed_mode | *_disable_fastnode | *_addr_book_strict | *_allow_duplicate_ip | *_logging | apptoml_telemetry_enabled | apptoml_telemetry_enable_hostname | apptoml_telemetry_enable_hostname_label | apptoml_telemetry_enable_service_label | *_skip_timeout_commit | *_create_empty_blocks | *_discard_abci_responses | *_compact | configtoml_instrumentation_prometheus | configtoml_statesync_enable | configtoml_rpc_unsafe | configtoml_filter_peers | *_pruning_*_enabled | *_service_enabled)
 		validate_boolean "$value"
 		;;
 

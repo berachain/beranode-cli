@@ -2,7 +2,7 @@
 # Command Dispatcher - Core Routing Module
 # =============================================================================
 #
-# VERSION: v0.9.0 (Current)
+# VERSION: v0.10.0 (Current)
 #
 # PURPOSE:
 #   This module serves as the central command router for the beranode CLI,
@@ -10,8 +10,8 @@
 #   managing the primary control flow of the application.
 #
 # CHANGELOG (Recent):
-#   v0.9.0 - Added --help flag support for init and start commands
-#   v0.9.0 - Implemented semantic versioning (semver) support
+#   v0.10.0 - Added --help flag support for init and start commands
+#   v0.10.0 - Implemented semantic versioning (semver) support
 #   v0.1.x - Added beacond TOML configurations
 #
 # =============================================================================
@@ -57,6 +57,7 @@ COMMANDS:
     start       Start the Berachain node
     stop        Stop running Berachain nodes
     status      Display live status of all Berachain nodes
+    snapshot    Download and restore official chain-state snapshots
     validate    Validate beranodes configuration file
     help        Show this help message
     version     Show version information
@@ -66,7 +67,8 @@ OPTIONS:
     -v, --version  Show version information
 
 EXAMPLES:
-    beranode init --network devnet --validators 1
+    beranode init --network bepolia --validators 1
+    beranode snapshot download --network bepolia
     beranode start
     beranode status
     beranode validate
@@ -152,7 +154,7 @@ main() {
 	# ---------------------------------------------------------------------
 	# [3.1] Help and Version Flags
 	# Handles: -h, --help, help, -v, --version, version
-	# Added in: v0.9.0 with enhanced --help support
+	# Added in: v0.10.0 with enhanced --help support
 	# ---------------------------------------------------------------------
 	-h | --help | help)
 		show_help
@@ -168,32 +170,37 @@ main() {
 	init)
 		# Initialize new node configuration
 		# Handler: cmd_init() in src/commands/init.sh
-		# Added: v0.1.x, Enhanced: v0.9.0 with --help flag
+		# Added: v0.1.x, Enhanced: v0.10.0 with --help flag
 		cmd_init "$@"
 		;;
 	start)
 		# Start the Berachain node
 		# Handler: cmd_start() in src/commands/start.sh
-		# Added: v0.1.x, Enhanced: v0.9.0 with --help flag
+		# Added: v0.1.x, Enhanced: v0.10.0 with --help flag
 		cmd_start "$@"
 		;;
 	stop)
 		# Stop the Berachain node
 		# Handler: cmd_stop() in src/commands/stop.sh
-		# Added: v0.9.0 with --help flag
+		# Added: v0.10.0 with --help flag
 		cmd_stop "$@"
 		;;
 	status)
 		# Display live status of all Berachain nodes
 		# Handler: cmd_status() in src/commands/status.sh
-		# Added: v0.9.0 with --help flag
+		# Added: v0.10.0 with --help flag
 		cmd_status "$@"
 		;;
 	validate)
 		# Validate beranodes configuration file
 		# Handler: cmd_validate() in src/commands/validate.sh
-		# Added: v0.9.0 with regex-based validation
+		# Added: v0.10.0 with regex-based validation
 		cmd_validate "$@"
+		;;
+	snapshot)
+		# Download / restore official chain-state snapshots
+		# Handler: cmd_snapshot() in src/commands/snapshot.sh
+		cmd_snapshot "$@"
 		;;
 
 	# ---------------------------------------------------------------------
