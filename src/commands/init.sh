@@ -334,7 +334,7 @@ cmd_init() {
 	# =========================================================================
 	# Check for help flag first before any other processing
 
-	if [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+	if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
 		show_init_help
 		return 0
 	fi
@@ -2288,8 +2288,29 @@ cmd_init() {
 	# =========================================================================
 	# [5] DIRECTORY STRUCTURE SETUP
 	# =========================================================================
-	# Create all required beranodes directory structure
+	# Check if beranodes directory already exists and prompt for override
+	if [[ -d "${BERANODES_PATH}" ]]; then
+		log_warn "Beranodes directory already exists: ${BERANODES_PATH}"
+		echo ""
+		echo -e "${YELLOW}An existing beranodes directory was found.${RESET}"
+		echo -e "${YELLOW}Re-initializing will remove the current directory and create a fresh one.${RESET}"
+		echo -e "${YELLOW}This will delete all existing node data, binaries, and configuration.${RESET}"
+		echo ""
+		read -p "Do you want to remove and re-initialize? (y/n): " confirm_override
+		case "$confirm_override" in
+		y | Y | yes | Yes | YES)
+			log_info "Removing existing beranodes directory: ${BERANODES_PATH}"
+			rm -rf "${BERANODES_PATH}"
+			log_success "Existing directory removed."
+			;;
+		*)
+			log_warn "Initialization aborted by user."
+			return 0
+			;;
+		esac
+	fi
 
+	# Create all required beranodes directory structure
 	ensure_dir_exists "${BERANODES_PATH}" "beranode directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_BIN}" "beranode binary directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_TMP}" "beranode temporary directory" || return 1
@@ -2300,6 +2321,10 @@ cmd_init() {
 	# =========================================================================
 	# [6] BINARY VERIFICATION
 	# =========================================================================
+	# Initialize docker tag variables (set by docker mode, empty for local mode)
+	local docker_beacond_tag="${docker_beacond_tag:-}"
+	local docker_berareth_tag="${docker_berareth_tag:-}"
+
 	# Verify beacond and bera-reth binaries exist and are executable
 	if [[ "$mode" == "local" ]]; then
 		missing_binaries=0
@@ -2309,13 +2334,15 @@ cmd_init() {
 			log_warn "Binary '${BIN_BEACONKIT}' not found or not executable: ${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}"
 		else
 			# Check if 'beacond version' command executes successfully
-			beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"
-			if [[ $? -eq 0 ]]; then
+			local beacon_version=""
+			if beacon_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BEACONKIT}" version 2>/dev/null)"; then
 				log_success "'${BIN_BEACONKIT} version' works as expected."
 				log_info "${BIN_BEACONKIT} version:\n${beacon_version}\n"
 				is_beacond_installed=true
 			else
-				log_error "'${BIN_BEACONKIT} version' did not work as expected."
+				# Binary exists but can't execute natively — needs rebuilding
+				log_warn "'${BIN_BEACONKIT}' exists but cannot execute on this platform."
+				log_info "Will attempt to build from source..."
 			fi
 		fi
 
@@ -2334,13 +2361,15 @@ cmd_init() {
 			missing_binaries=1
 		else
 			# Check if 'berareth version' command executes successfully
-			bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"
-			if [[ $? -eq 0 ]]; then
+			local bera_reth_version=""
+			if bera_reth_version="$("${BERANODES_PATH}${BERANODES_PATH_BIN}/${BIN_BERARETH}" --version 2>/dev/null)"; then
 				log_success "'${BIN_BERARETH} --version' works as expected."
 				log_info "${BIN_BERARETH} version:\n${bera_reth_version}\n"
 				is_berareth_installed=true
 			else
-				log_error "'${BIN_BERARETH} --version' did not work as expected."
+				# Binary exists but can't execute natively — needs rebuilding
+				log_warn "'${BIN_BERARETH}' exists but cannot execute on this platform."
+				log_info "Will attempt to build from source..."
 			fi
 		fi
 

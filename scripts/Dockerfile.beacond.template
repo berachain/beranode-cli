@@ -1,5 +1,7 @@
-# Image source - Alpine chosen for minimal size and fast build times
-FROM alpine:3.23.3
+# Official Go image: beacon-kit v1.4.1+ requires go >= 1.26.4.
+# Alpine's apk `go` package is currently 1.25.x and sets GOTOOLCHAIN=local,
+# which cannot satisfy that requirement.
+FROM golang:1.26.4-alpine
 
 # Build argument for the tag (defaults to "latest" which will fetch the latest release)
 ARG BEACON_KIT_TAG=latest
@@ -11,12 +13,11 @@ RUN ARCH=$(uname -m) && \
         exit 1; \
     fi
 
-# Install dependencies
+# Install dependencies (Go comes from the base image; do not apk add go)
 RUN apk update && \
     apk add --no-cache \
         bash \
         ncurses \
-        go \
         curl \
         wget \
         git \
@@ -36,8 +37,8 @@ RUN cd /tmp && git clone https://github.com/berachain/beacon-kit.git && \
     cp /tmp/beacon-kit/build/bin/beacond /usr/local/bin/beacond && \
     chmod +x /usr/local/bin/beacond
 
-# Clean up - Remove the build dependencies
-RUN apk del git make bash ncurses go build-base; rm -rf /tmp/*;
+# Clean up - Remove the build dependencies (Go is not an apk package in this image)
+RUN apk del git make bash ncurses build-base; rm -rf /tmp/* /usr/local/go /go;
 
 # Confirm beacond working
 RUN beacond version

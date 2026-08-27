@@ -59,6 +59,46 @@ Examples:
 EOF
 }
 
+################################################################################
+# Helper: print_port_section
+# Description: Prints a titled group of port keys from a node config object.
+################################################################################
+print_port_section() {
+	local node_json="$1"
+	local title="$2"
+	shift 2
+	local key value printed=false
+
+	for key in "$@"; do
+		value=$(printf '%s\n' "$node_json" | jq -r --arg k "$key" 'if has($k) and .[$k] != null then .[$k] else empty end')
+		if [[ -n "$value" ]]; then
+			if [[ "$printed" == false ]]; then
+				echo "-- ${title} --"
+				printed=true
+			fi
+			echo "${key}: ${value}"
+		fi
+	done
+}
+
+################################################################################
+# Helper: print_node_ports
+# Description: Prints the listening ports for a node, grouped by component.
+################################################################################
+print_node_ports() {
+	local node_json="$1"
+
+	echo "--------------------------------"
+	echo "Ports"
+	echo "--------------------------------"
+	print_port_section "$node_json" "bera-reth" \
+		ethrpc_port ethp2p_port ethproxy_port \
+		el_ethrpc_port el_ws_port el_authrpc_port el_eth_port el_prometheus_port
+	print_port_section "$node_json" "beacon-kit" \
+		cl_prometheus_port beacond_node_port \
+		configtoml_grpc_laddr configtoml_grpc_privileged_laddr
+}
+
 # =============================================================================
 # [SECTION 1.5] Docker Compose Generator
 # =============================================================================
@@ -464,6 +504,33 @@ cmd_start() {
 			log_error "docker-beacond:${docker_beacond_tag} image not found"
 			return 1
 		fi
+	elif [[ "${mode}" == "local" ]]; then
+		# Verify local binaries exist and can execute natively
+		if [[ ! -x "${bin_beacond}" ]]; then
+			log_error "beacond binary not found or not executable at: ${bin_beacond}"
+			log_error "Run 'beranode init' first to install binaries, or place native binaries in ${beranodes_dir}${BERANODES_PATH_BIN}/"
+			return 1
+		fi
+		if ! "${bin_beacond}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${bin_beacond} cannot execute on this platform."
+			log_error "Local mode requires native binaries. The binary may be built for a different OS/architecture."
+			log_error "Please provide a native '${BIN_BEACONKIT}' binary or use 'beranode init --mode docker' instead."
+			return 1
+		fi
+		log_success "beacond binary is valid: ${bin_beacond}"
+
+		if [[ ! -x "${bin_bera_reth}" ]]; then
+			log_error "bera-reth binary not found or not executable at: ${bin_bera_reth}"
+			log_error "Run 'beranode init' first to install binaries, or place native binaries in ${beranodes_dir}${BERANODES_PATH_BIN}/"
+			return 1
+		fi
+		if ! "${bin_bera_reth}" --version >/dev/null 2>&1; then
+			log_error "bera-reth binary at ${bin_bera_reth} cannot execute on this platform."
+			log_error "Local mode requires native binaries. The binary may be built for a different OS/architecture."
+			log_error "Please provide a native '${BIN_BERARETH}' binary or use 'beranode init --mode docker' instead."
+			return 1
+		fi
+		log_success "bera-reth binary is valid: ${bin_bera_reth}"
 	fi
 
 	# -------------------------------------------------------------------------
@@ -1328,6 +1395,7 @@ EOF
 				local bera_reth_private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
 				echo -n "${bera_reth_private_key}" > "${bera_reth_dir}/discovery-secret"
 				log_success "✔ bera-reth node initialized"
+				print_node_ports "${node_json}"
 			done
 
 			# Start the nodes
@@ -1355,6 +1423,13 @@ EOF
 				
 				if [[ $? -eq 0 ]]; then
 					log_success "✔ All nodes started successfully with docker-compose"
+					local nodes=$(jq -c '.nodes' "${config_json_path}")
+					for ((node_index = 0; node_index < ${nodes_count}; node_index++)); do
+						echo "--------------------------------"
+						echo "Starting node $node_index"
+						echo "--------------------------------"
+						print_node_ports "$(echo "${nodes}" | jq -c ".[$node_index]")"
+					done
 					log_info "To view logs: docker-compose -f ${compose_file} logs -f"
 					log_info "To stop: docker-compose -f ${compose_file} down"
 				else
@@ -1461,6 +1536,7 @@ EOF
 					local pid=$!
 					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
 					log_success "✔ Bera-reth node started"
+					print_node_ports "${node_json}"
 				done
 			fi
 		else

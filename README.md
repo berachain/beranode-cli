@@ -314,20 +314,23 @@ The test suite uses a custom lightweight bash testing framework ([tests/test_fra
   - URL validation (http, https, tcp, ws, wss)
   - Moniker validation (length and format)
   - Duration validation (s, m, h, ms, us, ns)
+- **[test_bump_version.sh](tests/test_bump_version.sh)** - Tests for SemVer bumping, changelog promotion, and version helpers
 
 ### Running Tests
 
-Execute all tests from the tests directory:
+Execute tests from the tests directory:
 
 ```bash
 cd tests
 ./test_validation.sh
+./test_bump_version.sh
 ```
 
 Or run from the project root:
 
 ```bash
 bash tests/test_validation.sh
+bash tests/test_bump_version.sh
 ```
 
 ### Test Output Example
@@ -376,35 +379,74 @@ print_results
 
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/) (SemVer). Version numbers follow the format `MAJOR.MINOR.PATCH`:
+This project follows [Semantic Versioning](https://semver.org/) (SemVer). The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary.
+
+Version numbers use `MAJOR.MINOR.PATCH`, with optional prereleases:
 
 - **MAJOR**: Incompatible API changes
 - **MINOR**: New functionality in a backwards-compatible manner
 - **PATCH**: Backwards-compatible bug fixes
+- **Prerelease**: `X.Y.Z-rc.N`, `X.Y.Z-alpha.N`, `X.Y.Z-beta.N`, or `X.Y.Z-pre.N`
+
+Document user-facing work under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). The bump script promotes that section into the new version.
 
 ### Bumping Versions
 
-Use the [scripts/bump-version.sh](scripts/bump-version.sh) script to manage version updates:
-
 ```bash
-# Increment patch version (e.g., 0.1.0 -> 0.1.1)
+# Increment patch / minor / major
 ./scripts/bump-version.sh patch
-
-# Increment minor version (e.g., 0.1.0 -> 0.2.0)
 ./scripts/bump-version.sh minor
-
-# Increment major version (e.g., 0.1.0 -> 1.0.0)
 ./scripts/bump-version.sh major
 
-# Set a specific version (e.g., 2.5.3)
+# Set an explicit version or prerelease
 ./scripts/bump-version.sh 2.5.3
+./scripts/bump-version.sh 1.0.0-rc.1
+
+# Inspect
+./scripts/bump-version.sh --current
+./scripts/bump-version.sh --notes           # notes for the current version
+./scripts/bump-version.sh --notes 0.9.0
 ```
+
+### Publishing to GitHub
+
+`--publish` bumps (unless the version is already set), commits the version files, creates an annotated `vX.Y.Z` tag, pushes to `origin`, and creates a [GitHub Release](https://github.com/berachain/beranode-cli/releases) with changelog notes and the `beranode` binary attached.
+
+Requires [GitHub CLI](https://cli.github.com/) (`gh`) authenticated to the repo.
+
+```bash
+# Preview
+./scripts/bump-version.sh minor --publish --dry-run
+
+# Bump, tag, push, and create the GitHub Release
+./scripts/bump-version.sh minor --publish -m "Add status and stop commands"
+
+# Non-interactive (CI or scripted)
+./scripts/bump-version.sh patch --publish --yes
+
+# Publish a prerelease
+./scripts/bump-version.sh 1.0.0-rc.1 --publish --prerelease --yes
+
+# Version files already bumped: tag + publish current version
+./scripts/bump-version.sh --publish --yes
+```
+
+Pushing a `vX.Y.Z` tag also triggers [.github/workflows/release.yml](.github/workflows/release.yml), which creates the GitHub Release if it does not already exist.
 
 ### Script Options
 
 - `--dry-run` - Preview changes without modifying files
-- `--tag` - Automatically create a git tag and commit
-- `-m, --message TEXT` - Add a description of changes for commit and tag messages
+- `-y, --yes` - Skip the confirmation prompt
+- `--tag` - Commit version files and create an annotated git tag
+- `--publish` - Tag, push, and create a GitHub Release (implies `--tag`)
+- `--draft` - Create the GitHub Release as a draft
+- `--prerelease` - Mark the GitHub Release as a prerelease
+- `--allow-branch` - Allow tagging/publishing from a non-default branch
+- `--allow-dirty` - Allow unrelated uncommitted files (they are not committed)
+- `--skip-tests` - Skip the tests `--publish` runs by default
+- `--remote NAME` - Git remote to push to (default: `origin`)
+- `--repo OWNER/NAME` - GitHub repo for changelog links and `gh release`
+- `-m, --message TEXT` - Summary for changelog, commit, tag, and GitHub Release
 - `-h, --help` - Show help information
 
 ### Examples
@@ -414,57 +456,38 @@ Use the [scripts/bump-version.sh](scripts/bump-version.sh) script to manage vers
 ./scripts/bump-version.sh patch --dry-run
 ```
 
-**Bump version and create a git tag:**
+**Bump only, then review:**
 ```bash
-./scripts/bump-version.sh minor --tag
-```
+# 1. Fill in CHANGELOG.md [Unreleased]
+# 2. Bump
+./scripts/bump-version.sh minor -m "Add status and stop commands"
 
-**Bump version with a description:**
-```bash
-./scripts/bump-version.sh patch --tag -m "Fix authentication bug and improve error handling"
-```
-
-**Manual release workflow:**
-```bash
-# 1. Update CHANGELOG.md with your changes
-# 2. Bump the version
-./scripts/bump-version.sh minor
-
-# 3. Review the changes
+# 3. Review
 git diff
 
-# 4. Commit and tag
-git add -A
-git commit -m "chore: release v0.2.0"
-git tag -a v0.2.0 -m "Release v0.2.0"
-
-# 5. Push to remote
-git push origin main --tags
+# 4. Tag and publish (does not bump again)
+./scripts/bump-version.sh --publish --yes
 ```
 
-**Automated release workflow with description:**
+**One-shot release:**
 ```bash
-# 1. Update CHANGELOG.md with your changes
-# 2. Bump version, commit, and tag in one step
-./scripts/bump-version.sh minor --tag -m "Add new user profile feature"
-
-# 3. Push to remote
-git push origin main --tags
+./scripts/bump-version.sh minor --publish --yes -m "Add status and stop commands"
 ```
 
 ### What the Script Does
 
-The `bump-version.sh` script automatically:
+The `bump-version.sh` script:
+
 1. Updates `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh)
-2. Rebuilds the [beranode](beranode) file from sources
-3. Updates [CHANGELOG.md](CHANGELOG.md) with:
-   - A new version section (newest versions at top, chronological order)
-   - Summary section (if `-m, --message` is provided)
-   - Changed Files section listing all modified files
-   - Standard changelog categories (Added, Changed, Deprecated, Removed, Fixed, Security)
-4. Updates version comparison links in the changelog
-5. Optionally creates a git commit and tag (with `--tag` flag)
-6. Includes a custom description in commit and tag messages (with `-m, --message` flag)
+2. Updates the current VERSION header in [src/core/dispatcher.sh](src/core/dispatcher.sh)
+3. Rebuilds [beranode](beranode) via `build.sh` (version is read from constants)
+4. Promotes `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) into the new version, preserving documented changes
+5. Adds a Summary (from `-m`) and Changed Files (from `git diff` since the previous tag)
+6. Updates changelog comparison links
+7. With `--tag`: commits only version files and creates `vX.Y.Z`
+8. With `--publish`: pushes the branch and tag, then runs `gh release create`
+
+It does **not** rewrite every `vX.Y.Z` string in the tree. Runtime version output always comes from `BERANODE_VERSION`.
 
 ## Contributing
 

@@ -1,0 +1,80 @@
+# =============================================================================
+# Cross-compilation Dockerfile: beacond for darwin-arm64 (macOS Apple Silicon)
+# =============================================================================
+# This Dockerfile builds a native macOS ARM64 binary from source inside Docker.
+#
+# CGO is required because beacon-kit depends on libraries that need it:
+#   - blst (BLS signatures), secp256k1, pebble, zstd, gopsutil, keychain
+#
+# Zig is used as the CGO cross-compiler because it ships with macOS libc and
+# system headers, enabling cross-compilation to macOS without the macOS SDK.
+#
+# Usage:
+#   docker build -f scripts/Dockerfile.beacond.darwin-arm64.template \
+#     --build-arg BEACON_KIT_TAG=v1.3.1 \
+#     -t beranode-builder-beacond-darwin-arm64:v1.3.1 .
+# =============================================================================
+
+# Official Go image: beacon-kit v1.4.1+ requires go >= 1.26.4.
+# Alpine's apk `go` package is currently 1.25.x and sets GOTOOLCHAIN=local,
+# which cannot satisfy that requirement.
+FROM golang:1.26.4-alpine
+
+# Build argument for the tag (defaults to "latest" which will fetch the latest release)
+ARG BEACON_KIT_TAG=latest
+
+# Install build dependencies (no architecture check — we're cross-compiling)
+# Go comes from the base image; do not apk add go.
+RUN apk update && \
+    apk add --no-cache \
+        bash \
+        ncurses \
+        curl \
+        wget \
+        git \
+        build-base \
+        python3 \
+        py3-pip
+
+# Install Zig via pip (used as the CGO cross-compiler targeting macOS).
+# The wrapper filters Go cgo flags (-arch, GNU ld options, -lresolv, -framework)
+# that prevent Zig from using its bundled macOS sysroot.
+RUN pip3 install --break-system-packages ziglang && \
+    ZIG_PATH=$(find / -name "zig" -type f -executable 2>/dev/null | grep -v __pycache__ | head -1) && \
+    echo "Zig found at: $ZIG_PATH" && \
+    mkdir -p /usr/local/etc && \
+    printf '%s\n' "$ZIG_PATH" > /usr/local/etc/zig-path
+COPY scripts/zig-cgo-wrapper.py /usr/local/bin/zig-cgo-wrapper.py
+RUN ln -sf /usr/local/bin/zig-cgo-wrapper.py /usr/local/bin/zigcc && \
+    ln -sf /usr/local/bin/zig-cgo-wrapper.py /usr/local/bin/zigcxx && \
+    chmod +x /usr/local/bin/zig-cgo-wrapper.py /usr/local/bin/zigcc /usr/local/bin/zigcxx
+ENV ZIG_TARGET=aarch64-macos
+
+# Copy macOS framework header stubs (CoreFoundation, Security) needed by go-keychain.
+# Zig's macOS sysroot includes libc/Mach headers but not framework headers.
+COPY scripts/macos-sdk-stubs/ /macos-sdk-stubs/
+
+# Clone, checkout tag, and cross-compile for darwin-arm64
+# CGO_ENABLED=1  — required for blst, secp256k1, pebble, zstd, gopsutil, keychain
+# CC=zigcc        — Zig as C cross-compiler targeting aarch64-macos
+# CGO_CFLAGS      — include path for macOS framework header stubs
+RUN cd /tmp && git clone https://github.com/berachain/beacon-kit.git && \
+    cd beacon-kit && \
+    git fetch --tags && \
+    if [ "$BEACON_KIT_TAG" = "latest" ]; then \
+        TAG=$(curl -sI https://github.com/berachain/beacon-kit/releases/latest | grep -i location: | grep -oE '/tag/[^ ]+' | awk -F'/tag/' '{print $2}' | tr -d '\r\n'); \
+    else \
+        TAG="$BEACON_KIT_TAG"; \
+    fi && \
+    git checkout $TAG && \
+    CGO_ENABLED=1 CC=zigcc CXX=zigcxx CGO_CFLAGS="-I/macos-sdk-stubs" GOOS=darwin GOARCH=arm64 make build && \
+    cp /tmp/beacon-kit/build/bin/beacond /usr/local/bin/beacond && \
+    chmod +x /usr/local/bin/beacond
+
+# Clean up build dependencies (Go is not an apk package in this image)
+RUN apk del git make bash ncurses build-base python3 py3-pip; rm -rf /tmp/* /usr/local/go /go;
+
+# NOTE: Cannot verify binary here — it's a macOS binary inside a Linux container.
+# Verification happens on the host after extraction via 'docker cp'.
+
+CMD ["tail", "-f", "/dev/null"]

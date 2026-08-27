@@ -9,13 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitHub Release publishing via `./scripts/bump-version.sh --publish`
+- GitHub Actions workflow that creates a release when a `vX.Y.Z` tag is pushed
+- Prerelease versions (`X.Y.Z-rc.N`, `-alpha.N`, `-beta.N`, `-pre.N`)
+- `./scripts/bump-version.sh --current` and `--notes` helpers
+- `beranode start` prints each node's listening ports after configure and after start, grouped under `-- bera-reth --` and `-- beacon-kit --`
+
 ### Changed
+
+- Version bumping no longer rewrites every `vX.Y.Z` string in shell sources
+- Changelog promotion preserves `[Unreleased]` entries instead of discarding them
+- `build.sh` reads `BERANODE_VERSION` from `src/lib/constants.sh` instead of hardcoding it
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- Download URL matching now recognizes bera-reth cargo target triples (`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`) in addition to beacond's Go `GOOS-GOARCH` names, so macOS ARM pre-built binaries are used instead of failing with "No download URL found for 'darwin-arm64'"
+- GitHub release JSON is no longer mixed with `[INFO]` logs on stdout, which made `jq` fail with `Invalid numeric literal at line 1, column 2` and skip pre-built darwin-arm64 binaries
 
 ### Security
 

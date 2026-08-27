@@ -1221,6 +1221,14 @@ generate_base_beacond_config() {
 			log_error "beacond binary not found or not executable at: ${beacond_binary}"
 			return 1
 		fi
+
+		# Verify beacond can actually execute on this platform
+		if ! "${beacond_binary}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${beacond_binary} cannot execute on this platform."
+			log_error "The binary may be built for a different OS/architecture (e.g., Linux binary on macOS)."
+			log_error "Please rebuild with 'beranode init' or provide a native binary."
+			return 1
+		fi
 	fi
 
 	# Clean up any existing beacond directory
@@ -1588,6 +1596,14 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 		beacond_binary="${config_dir}/bin/beacond"
 		if [[ ! -x "${beacond_binary}" ]]; then
 			log_error "beacond binary not found or not executable at: ${beacond_binary}"
+			return 1
+		fi
+
+		# Verify beacond can actually execute on this platform
+		if ! "${beacond_binary}" version >/dev/null 2>&1; then
+			log_error "beacond binary at ${beacond_binary} cannot execute on this platform."
+			log_error "The binary may be built for a different OS/architecture (e.g., Linux binary on macOS)."
+			log_error "Please rebuild with 'beranode init' or provide a native binary."
 			return 1
 		fi
 	fi
