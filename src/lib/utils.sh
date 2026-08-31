@@ -122,10 +122,29 @@ generate_evm_private_key() {
 
 	# Use 'cast wallet new' to generate a new wallet and extract the private key
 	# Format: "Private key: 0x..." - we parse this with awk and xargs to trim
-  local private_key="$(cast wallet new --json | jq -r '.[0].private_key')"
+  # Check if `cast wallet new --json` output has an attribute called "data"
+  # Try to check if top-level JSON is an array to avoid 'Cannot index object with number' error
+  # Detect JSON type: object or array
+  local cast_json
+  cast_json="$(cast wallet new --json)"
+  local json_type
+  json_type="$(echo "$cast_json" | jq -r 'type')"
+
+  local private_key=""
+  if [[ "$json_type" == "object" ]]; then
+    # Object: expect .data to be an array, use .data[0].private_key
+    private_key="$(echo "$cast_json" | jq -r '.data[0].private_key')"
+    [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is object, using .data[0].private_key: $private_key" >&2
+  elif [[ "$json_type" == "array" ]]; then
+    # Array: legacy cast format, use .[0].private_key
+    private_key="$(echo "$cast_json" | jq -r '.[0].private_key')"
+    [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is array, using .[0].private_key: $private_key" >&2
+  else
+    [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Unexpected JSON output type: $json_type" >&2
+  fi
 
 	# Validate that key generation succeeded and returned a non-empty value
-	if [[ $? -ne 0 || -z "$private_key" ]]; then
+	if [[ -z "$private_key" || "$private_key" == "null" ]]; then
 		log_error "Failed to generate EVM private key using cast."
 		return 1
 	fi
