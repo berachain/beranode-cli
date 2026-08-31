@@ -2265,7 +2265,7 @@ generate_evm_private_key() {
 
 	# Use 'cast wallet new' to generate a new wallet and extract the private key
 	# Format: "Private key: 0x..." - we parse this with awk and xargs to trim
-	local private_key=$(cast wallet new 2>/dev/null | awk -F': ' '/Private key:/ {print $2}' | xargs)
+  local private_key="$(cast wallet new --json | jq -r '.[0].private_key')"
 
 	# Validate that key generation succeeded and returned a non-empty value
 	if [[ $? -ne 0 || -z "$private_key" ]]; then
