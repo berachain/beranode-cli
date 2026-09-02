@@ -1,0 +1,49 @@
+# TODOS
+
+- [ ] install dependencies
+  - [ ] verify linux distro or mac os or windows
+  - [ ] foundry
+  - [ ] rust
+  - [ ] curl
+  - [ ] wget
+  - [ ] gzip
+  - [ ] lz4
+- [ ] all explicit flags supported
+- [ ] node types
+  - [ ] pruned
+  - [ ] archive
+  - [ ] validator
+- [ ] snapshots
+  - [ ] url support
+  - [ ] recognizing bepolia vs mainnet
+  - [ ] backup
+  - [ ] rollback
+  - [ ] pruned and snapshots
+- [ ] upgrades
+  - [ ] upgrade to latest
+  - [ ] rollback
+  - [ ] rollback to specific versions
+- [ ] service managers
+  - [x] macos: launchd support
+    - [x] logs
+    - [x] start & stop
+  - [ ] linux: systemd support
+    - [ ] logs
+    - [ ] start & stop
+  - [ ] windows: windows services
+    - [ ] logs
+    - [ ] start & stop
+- [ ] logs output
+  - [ ] host
+    - [ ] tail
+  - [ ] service manager
+  - [ ] docker
+- [ ] watcher
+  - [ ] system resources
+    - [x] storage
+    - [ ] memory
+    - [ ] cpu
+  - [ ] alert systems
+  - [ ] fix this "[WARN] Node directories already exist in /Users/mannybera/Documents/github/berachain--beranode-cli/beranodes/nodes
+Do you want to delete them? (y/n) n
+[ERROR] Node directories not deleted. stopping...

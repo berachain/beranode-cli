@@ -15,6 +15,7 @@ set -euo pipefail
 #   - Public EL RPC (LIVE EL BLOCK): chain tip from the official RPC for
 #     bepolia/mainnet only (omitted on devnet), refreshed every 10 seconds
 #   - Docker container status (when running in docker mode)
+#   - Host storage: volume capacity/used, plus `beranodes/nodes` directory size
 #
 # VERSION CONTEXT - Beranode CLI v0.9.0
 #
@@ -33,12 +34,25 @@ set -euo pipefail
 #    └─ format_block_age()        : Human-readable time since latest CL block
 #    └─ colorize_status()         : Apply ANSI color to a status string
 #
+# [SECTION 2b] Storage Helpers
+#    └─ status_comma()            : Thousands separators (bash 3.2)
+#    └─ status_percent()          : part/whole as a percent string
+#    └─ status_diskutil_field()   : Parse a diskutil info "Label: (N Bytes)" line
+#    └─ status_query_volume_bytes(): Container/filesystem total + used bytes
+#    └─ status_dir_bytes()        : Recursive directory size via du
+#    └─ status_refresh_storage()  : Cached volume + nodes-dir sizes
+#    └─ status_storage_json()     : Storage object for --json
+#    └─ status_print_storage_footer() : Human-readable Storage section
+#    └─ status_query_one_node()   : One node's EL/CL fields as JSON
+#    └─ status_collect_nodes_json(): JSON array of all node status objects
+#
 # [SECTION 3] Table Formatting
 #    └─ print_status_row()        : Render a compact-mode row
 #    └─ print_verbose_row()       : Render a verbose-mode row
 #
 # [SECTION 4] Rendering
 #    └─ render_status_table()     : Render the full status table (one frame)
+#    └─ render_status_json()      : Render the same snapshot as JSON
 #
 # [SECTION 5] Main Command Function
 #    └─ cmd_status()              : Entry point for the status command
@@ -63,10 +77,15 @@ and Consensus Layer (beacond) endpoints to report block height, peer count,
 sync status, and more. For bepolia/mainnet, also queries the public RPC for
 LIVE EL BLOCK (refreshed every 10 seconds in --watch mode).
 
+Also reports host storage: total volume capacity, space used on the device,
+and the size of beranodes/nodes (as a percent of total). On macOS this uses
+APFS container totals from diskutil (df as fallback); on Linux it uses df.
+
 Options:
   --verbose|-v              Show each service (beacond, bera-reth) as its own row
   --watch|-w                Live-refresh mode (re-queries every N seconds)
   --interval|-i <seconds>   Refresh interval for watch mode (default: 2)
+  --json                    Machine-readable JSON (incompatible with --watch)
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
   --help|-h                 Display this help message
@@ -74,6 +93,7 @@ Options:
 Examples:
   beranode status
   beranode status --verbose
+  beranode status --json
   beranode status --watch
   beranode status --watch --verbose --interval 5
   beranode status --beranodes-dir /custom/path
@@ -373,6 +393,399 @@ colorize_catching_up() {
 }
 
 # =============================================================================
+# [SECTION 2b] Storage Helpers
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Function: status_comma
+# Description: Inserts thousands separators into a non-negative integer.
+#              Bash 3.2 compatible (no negative substring offsets).
+# Arguments:
+#   $1 - n (integer string)
+# Returns:
+#   Prints e.g. 7999 → 7,999
+# -----------------------------------------------------------------------------
+status_comma() {
+	local n="$1"
+	local out="" len start
+	while [ ${#n} -gt 3 ]; do
+		len=${#n}
+		start=$((len - 3))
+		out=",${n:$start:3}${out}"
+		n=${n:0:$start}
+	done
+	printf '%s%s' "$n" "$out"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_percent
+# Description: (part / whole) * 100, rounded, with a fixed number of decimals.
+# Arguments:
+#   $1 - part (integer bytes)
+#   $2 - whole (integer bytes)
+#   $3 - decimals (integer, default 1)
+# Returns:
+#   Prints e.g. 24.6 or 0.16, or "--" if whole is 0
+# -----------------------------------------------------------------------------
+status_percent() {
+	local part="$1"
+	local whole="$2"
+	local decimals="${3:-1}"
+	if [[ -z "${whole}" || "${whole}" -eq 0 ]]; then
+		echo "--"
+		return 0
+	fi
+	local scale=1 i
+	for ((i = 0; i < decimals; i++)); do
+		scale=$((scale * 10))
+	done
+	local scaled=$(( (part * 100 * scale + whole / 2) / whole ))
+	local int=$((scaled / scale))
+	local frac=$((scaled % scale))
+	printf "%s.%0*d" "${int}" "${decimals}" "${frac}"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_diskutil_field
+# Description: Extracts the byte count from a diskutil info line such as
+#              "Container Total Space:  8.0 TB (7998551654400 Bytes) (...)"
+# Arguments:
+#   $1 - info (string): Full `diskutil info` text
+#   $2 - label (string): Field label, e.g. "Container Total Space"
+# Returns:
+#   Prints the integer byte count, or empty on failure
+# -----------------------------------------------------------------------------
+status_diskutil_field() {
+	local info="$1"
+	local label="$2"
+	local line val
+	while IFS= read -r line; do
+		case "${line}" in
+		*"${label}:"*)
+			val=${line#*(}
+			val=${val%% Bytes*}
+			val=${val// /}
+			if [[ "${val}" =~ ^[0-9]+$ ]]; then
+				echo "${val}"
+				return 0
+			fi
+			;;
+		esac
+	done <<< "${info}"
+	return 1
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_query_volume_bytes
+# Description: Total and used bytes for the volume that holds $1.
+#              macOS: APFS container total − container free via diskutil,
+#              falling back to POSIX df. Linux/other: df -P -k.
+# Arguments:
+#   $1 - path (string): File or directory on the target volume
+# Returns:
+#   Prints "<total_bytes> <used_bytes>"
+# -----------------------------------------------------------------------------
+status_query_volume_bytes() {
+	local path="$1"
+	if [[ ! -e "${path}" ]]; then
+		path=$(dirname "${path}")
+	fi
+	if [[ ! -e "${path}" ]]; then
+		path="."
+	fi
+
+	if [[ "${IS_MACOS}" == "true" ]]; then
+		local mount info total_s free_s
+		mount=$(df -P "${path}" 2>/dev/null | awk 'NR==2 {print $NF}')
+		if [[ -n "${mount}" ]]; then
+			info=$(diskutil info "${mount}" 2>/dev/null) || info=""
+			if [[ -n "${info}" ]]; then
+				total_s=$(status_diskutil_field "${info}" "Container Total Space") || total_s=""
+				free_s=$(status_diskutil_field "${info}" "Container Free Space") || free_s=""
+				if [[ -n "${total_s}" && -n "${free_s}" ]]; then
+					echo "${total_s} $((total_s - free_s))"
+					return 0
+				fi
+			fi
+		fi
+	fi
+
+	local blocks used_blocks
+	read -r blocks used_blocks < <(df -P -k "${path}" 2>/dev/null | awk 'NR==2 {print $2, $3}') || true
+	if [[ -n "${blocks}" && "${blocks}" =~ ^[0-9]+$ && "${used_blocks}" =~ ^[0-9]+$ ]]; then
+		echo "$((blocks * 1024)) $((used_blocks * 1024))"
+		return 0
+	fi
+
+	echo "0 0"
+	return 1
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_dir_bytes
+# Description: Allocated size of a directory tree (du -sk, 1024-byte blocks).
+# Arguments:
+#   $1 - dir (string)
+# Returns:
+#   Prints byte count (0 if missing or unreadable)
+# -----------------------------------------------------------------------------
+status_dir_bytes() {
+	local dir="$1"
+	if [[ ! -d "${dir}" ]]; then
+		echo 0
+		return 0
+	fi
+	local k
+	k=$(du -sk "${dir}" 2>/dev/null | awk '{print $1}')
+	if [[ -z "${k}" || ! "${k}" =~ ^[0-9]+$ ]]; then
+		echo 0
+		return 0
+	fi
+	echo $((k * 1024))
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_refresh_storage
+# Description: Updates caller-scoped storage_* locals (cached in --watch).
+# Caller-scoped: beranodes_dir, storage_path, storage_total_b, storage_used_b,
+#   storage_nodes_b, storage_fetched_at, storage_ok
+# -----------------------------------------------------------------------------
+status_refresh_storage() {
+	local now
+	now=$(date +%s 2>/dev/null) || now=0
+
+	if [[ ${storage_fetched_at} -gt 0 && ${now} -gt 0 ]]; then
+		local elapsed=$(( now - storage_fetched_at ))
+		if [[ ${elapsed} -lt ${STORAGE_REFRESH_SECONDS} ]]; then
+			return 0
+		fi
+	fi
+
+	storage_path="${beranodes_dir}${BERANODES_PATH_NODES}"
+
+	local vol total_b used_b
+	vol=$(status_query_volume_bytes "${storage_path}") || vol="0 0"
+	total_b=${vol%% *}
+	used_b=${vol#* }
+
+	storage_total_b="${total_b}"
+	storage_used_b="${used_b}"
+	storage_nodes_b=$(status_dir_bytes "${storage_path}")
+
+	if [[ "${storage_total_b}" =~ ^[0-9]+$ && "${storage_total_b}" -gt 0 ]]; then
+		storage_ok="true"
+	else
+		storage_ok="false"
+	fi
+	storage_fetched_at=${now}
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_storage_json
+# Description: JSON object for the Storage section. Uses caller-scoped storage_*.
+# -----------------------------------------------------------------------------
+status_storage_json() {
+	if [[ "${storage_ok}" != "true" ]]; then
+		jq -n --arg path "${storage_path}" '{
+			path: $path,
+			total_bytes: null,
+			device_used_bytes: null,
+			nodes_bytes: null,
+			total_gb: null,
+			device_used_gb: null,
+			nodes_gb: null,
+			device_used_percent: null,
+			nodes_percent: null
+		}'
+		return 0
+	fi
+
+	local used_pct nodes_pct total_gb_cents used_gb_cents nodes_gb_cents
+	used_pct=$(status_percent "${storage_used_b}" "${storage_total_b}" 1)
+	nodes_pct=$(status_percent "${storage_nodes_b}" "${storage_total_b}" 2)
+	total_gb_cents=$((storage_total_b / 10000000))
+	used_gb_cents=$((storage_used_b / 10000000))
+	nodes_gb_cents=$((storage_nodes_b / 10000000))
+
+	jq -n \
+		--arg path "${storage_path}" \
+		--argjson total_bytes "${storage_total_b}" \
+		--argjson device_used_bytes "${storage_used_b}" \
+		--argjson nodes_bytes "${storage_nodes_b}" \
+		--argjson total_gb_cents "${total_gb_cents}" \
+		--argjson used_gb_cents "${used_gb_cents}" \
+		--argjson nodes_gb_cents "${nodes_gb_cents}" \
+		--argjson device_used_percent "${used_pct}" \
+		--argjson nodes_percent "${nodes_pct}" \
+		'{
+			path: $path,
+			total_bytes: $total_bytes,
+			device_used_bytes: $device_used_bytes,
+			nodes_bytes: $nodes_bytes,
+			total_gb: ($total_gb_cents / 100),
+			device_used_gb: ($used_gb_cents / 100),
+			nodes_gb: ($nodes_gb_cents / 100),
+			device_used_percent: $device_used_percent,
+			nodes_percent: $nodes_percent
+		}'
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_print_storage_footer
+# Description: Human-readable Storage block under the status table.
+# -----------------------------------------------------------------------------
+status_print_storage_footer() {
+	echo -e "  ${BOLD}Storage:${RESET}"
+	if [[ "${storage_ok}" != "true" ]]; then
+		echo "    Total space:      --"
+		echo "    Device used:      --"
+		echo "    Nodes directory:  --"
+		return 0
+	fi
+
+	local total_gb used_gb used_pct nodes_pct nodes_cents nodes_int nodes_frac
+	total_gb=$(( (storage_total_b + 500000000) / 1000000000 ))
+	used_gb=$(( (storage_used_b + 500000000) / 1000000000 ))
+	used_pct=$(status_percent "${storage_used_b}" "${storage_total_b}" 1)
+	nodes_pct=$(status_percent "${storage_nodes_b}" "${storage_total_b}" 2)
+	nodes_cents=$(( (storage_nodes_b + 5000000) / 10000000 ))
+	nodes_int=$((nodes_cents / 100))
+	nodes_frac=$(printf '%02d' $((nodes_cents % 100)))
+
+	printf "    Total space:      %s GB\n" "$(status_comma "${total_gb}")"
+	printf "    Device used:      %s GB (%s%%)\n" "$(status_comma "${used_gb}")" "${used_pct}"
+	printf "    Nodes directory:  %s.%s GB (%s%%)\n" "$(status_comma "${nodes_int}")" "${nodes_frac}" "${nodes_pct}"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_query_one_node
+# Description: Queries EL + CL for a single node and prints a JSON object of
+#              string fields ("--" when a value is unavailable).
+# Arguments:
+#   $1 - node_json (string): One element of the config .nodes array
+#   $2 - mode (string): docker|local|serviceman
+#   $3 - index (integer): Node index (for docker container name matching)
+# -----------------------------------------------------------------------------
+status_query_one_node() {
+	local node_json="$1"
+	local mode="$2"
+	local i="$3"
+
+	local node_moniker node_role
+	node_moniker=$(echo "${node_json}" | jq -r '.moniker')
+	node_role=$(echo "${node_json}" | jq -r '.role')
+
+	local el_port cl_port
+	el_port=$(echo "${node_json}" | jq -r '.el_ethrpc_port')
+	cl_port=$(echo "${node_json}" | jq -r '.ethrpc_port')
+
+	local role_short="${node_role}"
+	[[ "${node_role}" == "validator" ]] && role_short="val"
+
+	local el_status="offline"
+	local el_block="--"
+	local el_peers="--"
+
+	if [[ "${mode}" == "docker" ]]; then
+		el_status=$(get_docker_container_status "${i}-${role_short}.*bera-reth")
+	elif [[ "${mode}" == "serviceman" ]]; then
+		el_status=$(serviceman_component_status "${beranodes_dir}" "${moniker}" "${i}" "bera-reth")
+	fi
+
+	local el_block_result
+	el_block_result=$(query_el_block "${el_port}")
+	if [[ "${el_block_result}" != "--" ]]; then
+		el_block=$(hex_to_dec "${el_block_result}")
+		[[ "${el_status}" == "offline" ]] && el_status="running"
+	fi
+
+	local el_peers_result
+	el_peers_result=$(query_el_peers "${el_port}")
+	if [[ "${el_peers_result}" != "--" ]]; then
+		el_peers="${el_peers_result}"
+	fi
+
+	local cl_status="offline"
+	local cl_block="--"
+	local cl_peers="--"
+	local catching_up="--"
+	local block_time="--"
+
+	if [[ "${mode}" == "docker" ]]; then
+		cl_status=$(get_docker_container_status "${i}-${role_short}.*beacond")
+	elif [[ "${mode}" == "serviceman" ]]; then
+		cl_status=$(serviceman_component_status "${beranodes_dir}" "${moniker}" "${i}" "beacond")
+	fi
+
+	local cl_result
+	cl_result=$(query_cl_status "${cl_port}")
+	local cl_block_val cl_catching_val cl_peers_val cl_time_val
+	cl_block_val=$(echo "${cl_result}" | awk '{print $1}')
+	cl_catching_val=$(echo "${cl_result}" | awk '{print $2}')
+	cl_peers_val=$(echo "${cl_result}" | awk '{print $3}')
+	cl_time_val=$(echo "${cl_result}" | awk '{print $4}')
+
+	if [[ "${cl_block_val}" != "--" ]]; then
+		cl_block="${cl_block_val}"
+		[[ "${cl_status}" == "offline" ]] && cl_status="running"
+	fi
+	if [[ "${cl_catching_val}" != "--" ]]; then
+		catching_up="${cl_catching_val}"
+	fi
+	if [[ "${cl_peers_val}" != "--" ]]; then
+		cl_peers="${cl_peers_val}"
+	fi
+	if [[ "${cl_time_val}" != "--" ]]; then
+		block_time="${cl_time_val}"
+	fi
+
+	local block_age
+	block_age=$(format_block_age "${block_time}")
+
+	jq -n \
+		--arg moniker "${node_moniker}" \
+		--arg role "${node_role}" \
+		--arg el_status "${el_status}" \
+		--arg el_block "${el_block}" \
+		--arg el_peers "${el_peers}" \
+		--arg cl_status "${cl_status}" \
+		--arg cl_block "${cl_block}" \
+		--arg cl_peers "${cl_peers}" \
+		--arg catching_up "${catching_up}" \
+		--arg block_age "${block_age}" \
+		'{
+			moniker: $moniker,
+			role: $role,
+			el_status: $el_status,
+			el_block: $el_block,
+			el_peers: $el_peers,
+			cl_status: $cl_status,
+			cl_block: $cl_block,
+			cl_peers: $cl_peers,
+			catching_up: $catching_up,
+			block_age: $block_age
+		}'
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_collect_nodes_json
+# Description: Queries every configured node. Uses caller-scoped nodes_json,
+#              nodes_count, and mode.
+# Returns:
+#   Prints a JSON array of status_query_one_node objects
+# -----------------------------------------------------------------------------
+status_collect_nodes_json() {
+	local arr="[]"
+	local i node_json obj
+	for ((i = 0; i < nodes_count; i++)); do
+		node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+		obj=$(status_query_one_node "${node_json}" "${mode}" "${i}")
+		arr=$(echo "${arr}" | jq -c --argjson n "${obj}" '. + [$n]')
+	done
+	echo "${arr}"
+}
+
+# =============================================================================
 # [SECTION 3] Table Formatting
 # =============================================================================
 
@@ -427,6 +840,7 @@ print_verbose_row() {
 
 render_status_table() {
 	refresh_live_el_block
+	status_refresh_storage
 
 	# -------------------------------------------------------------------------
 	# Print header
@@ -462,86 +876,28 @@ render_status_table() {
 	# -------------------------------------------------------------------------
 	# Query each node and print status rows
 	# -------------------------------------------------------------------------
+	local collected i
+	collected=$(status_collect_nodes_json)
+
 	for ((i = 0; i < nodes_count; i++)); do
-		local node_json
-		node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+		local node_obj
+		node_obj=$(echo "${collected}" | jq -c ".[$i]")
 
-		# Extract node fields from config
 		local node_moniker node_role
-		node_moniker=$(echo "${node_json}" | jq -r '.moniker')
-		node_role=$(echo "${node_json}" | jq -r '.role')
+		node_moniker=$(echo "${node_obj}" | jq -r '.moniker')
+		node_role=$(echo "${node_obj}" | jq -r '.role')
 
-		local el_port cl_port
-		el_port=$(echo "${node_json}" | jq -r '.el_ethrpc_port')
-		cl_port=$(echo "${node_json}" | jq -r '.ethrpc_port')
+		local el_status el_block el_peers
+		el_status=$(echo "${node_obj}" | jq -r '.el_status')
+		el_block=$(echo "${node_obj}" | jq -r '.el_block')
+		el_peers=$(echo "${node_obj}" | jq -r '.el_peers')
 
-		# Abbreviate role for docker container name matching
-		local role_short="${node_role}"
-		[[ "${node_role}" == "validator" ]] && role_short="val"
-
-		# -- Execution Layer status --
-		local el_status="offline"
-		local el_block="--"
-		local el_peers="--"
-
-		# In docker mode, check container status first
-		if [[ "${mode}" == "docker" ]]; then
-			el_status=$(get_docker_container_status "${i}-${role_short}.*bera-reth")
-		fi
-
-		# Query EL RPC regardless of mode (if reachable, it is running)
-		local el_block_result
-		el_block_result=$(query_el_block "${el_port}")
-		if [[ "${el_block_result}" != "--" ]]; then
-			el_block=$(hex_to_dec "${el_block_result}")
-			# If we got a response, the EL is running
-			[[ "${el_status}" == "offline" ]] && el_status="running"
-		fi
-
-		local el_peers_result
-		el_peers_result=$(query_el_peers "${el_port}")
-		if [[ "${el_peers_result}" != "--" ]]; then
-			el_peers="${el_peers_result}"
-		fi
-
-		# -- Consensus Layer status --
-		local cl_status="offline"
-		local cl_block="--"
-		local cl_peers="--"
-		local catching_up="--"
-		local block_time="--"
-
-		# In docker mode, check container status first
-		if [[ "${mode}" == "docker" ]]; then
-			cl_status=$(get_docker_container_status "${i}-${role_short}.*beacond")
-		fi
-
-		# Query CL RPC
-		local cl_result
-		cl_result=$(query_cl_status "${cl_port}")
-		local cl_block_val cl_catching_val cl_peers_val cl_time_val
-		cl_block_val=$(echo "${cl_result}" | awk '{print $1}')
-		cl_catching_val=$(echo "${cl_result}" | awk '{print $2}')
-		cl_peers_val=$(echo "${cl_result}" | awk '{print $3}')
-		cl_time_val=$(echo "${cl_result}" | awk '{print $4}')
-
-		if [[ "${cl_block_val}" != "--" ]]; then
-			cl_block="${cl_block_val}"
-			[[ "${cl_status}" == "offline" ]] && cl_status="running"
-		fi
-		if [[ "${cl_catching_val}" != "--" ]]; then
-			catching_up="${cl_catching_val}"
-		fi
-		if [[ "${cl_peers_val}" != "--" ]]; then
-			cl_peers="${cl_peers_val}"
-		fi
-		if [[ "${cl_time_val}" != "--" ]]; then
-			block_time="${cl_time_val}"
-		fi
-
-		# Compute human-readable block age
-		local block_age
-		block_age=$(format_block_age "${block_time}")
+		local cl_status cl_block cl_peers catching_up block_age
+		cl_status=$(echo "${node_obj}" | jq -r '.cl_status')
+		cl_block=$(echo "${node_obj}" | jq -r '.cl_block')
+		cl_peers=$(echo "${node_obj}" | jq -r '.cl_peers')
+		catching_up=$(echo "${node_obj}" | jq -r '.catching_up')
+		block_age=$(echo "${node_obj}" | jq -r '.block_age')
 
 		# -- Render output --
 		if [[ "${verbose}" == "true" ]]; then
@@ -615,6 +971,63 @@ render_status_table() {
 	done
 
 	echo ""
+	status_print_storage_footer
+	echo ""
+}
+
+# -----------------------------------------------------------------------------
+# Function: render_status_json
+# Description: Prints one status snapshot as pretty JSON (stdout only).
+# Caller-scoped locals match render_status_table.
+# -----------------------------------------------------------------------------
+render_status_json() {
+	refresh_live_el_block
+	status_refresh_storage
+
+	local collected storage_obj live_el_json
+	collected=$(status_collect_nodes_json)
+	storage_obj=$(status_storage_json)
+
+	if [[ "${show_live_el}" == "true" && "${live_el_block}" != "--" ]]; then
+		live_el_json="${live_el_block}"
+	else
+		live_el_json="null"
+	fi
+
+	jq -n \
+		--arg network "${network}" \
+		--arg chain_id "${chain_id}" \
+		--arg mode "${mode}" \
+		--arg moniker "${moniker}" \
+		--argjson total_nodes "${total_nodes}" \
+		--argjson live_el_block "${live_el_json}" \
+		--argjson storage "${storage_obj}" \
+		--argjson nodes "${collected}" \
+		'{
+			network: $network,
+			chain_id: $chain_id,
+			mode: $mode,
+			moniker: $moniker,
+			total_nodes: $total_nodes,
+			live_el_block: $live_el_block,
+			storage: $storage,
+			nodes: ($nodes | map({
+				moniker: .moniker,
+				role: .role,
+				el: {
+					status: .el_status,
+					block: (if .el_block == "--" then null else (.el_block | tonumber) end),
+					peers: (if .el_peers == "--" then null else (.el_peers | tonumber) end)
+				},
+				cl: {
+					status: .cl_status,
+					block: (if .cl_block == "--" then null else (.cl_block | tonumber) end),
+					peers: (if .cl_peers == "--" then null else (.cl_peers | tonumber) end),
+					catching_up: (if .catching_up == "true" then true elif .catching_up == "false" then false else null end),
+					block_age: (if .block_age == "--" then null else .block_age end)
+				}
+			}))
+		}'
 }
 
 # =============================================================================
@@ -635,6 +1048,7 @@ cmd_status() {
 	local beranodes_dir="${BERANODES_PATH_DEFAULT}"
 	local verbose="false"
 	local watch_mode="false"
+	local json_mode="false"
 	local interval=2
 
 	while [[ $# -gt 0 ]]; do
@@ -649,6 +1063,10 @@ cmd_status() {
 			;;
 		--watch | -w)
 			watch_mode="true"
+			shift
+			;;
+		--json)
+			json_mode="true"
 			shift
 			;;
 		--interval | -i)
@@ -668,6 +1086,11 @@ cmd_status() {
 			;;
 		esac
 	done
+
+	if [[ "${json_mode}" == "true" && "${watch_mode}" == "true" ]]; then
+		log_error "--json cannot be used with --watch"
+		return 1
+	fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 2] Load and validate configuration
@@ -708,10 +1131,22 @@ cmd_status() {
 	local live_el_fetched_at=0
 	local show_live_el="false"
 
+	# Cached storage totals; status_refresh_storage updates these every
+	# STORAGE_REFRESH_SECONDS so --watch does not re-walk beranodes/nodes
+	# on every table refresh.
+	local storage_path=""
+	local storage_total_b=0
+	local storage_used_b=0
+	local storage_nodes_b=0
+	local storage_fetched_at=0
+	local storage_ok="false"
+
 	# -------------------------------------------------------------------------
-	# [STEP 3] Render — once or in a loop
+	# [STEP 3] Render — JSON, once, or in a watch loop
 	# -------------------------------------------------------------------------
-	if [[ "${watch_mode}" == "true" ]]; then
+	if [[ "${json_mode}" == "true" ]]; then
+		render_status_json
+	elif [[ "${watch_mode}" == "true" ]]; then
 		# Ensure terminal is usable for watch mode
 		if [[ ! -t 1 ]]; then
 			log_error "Watch mode requires an interactive terminal (stdout is not a TTY)."
@@ -737,9 +1172,9 @@ cmd_status() {
 			local now_ts
 			now_ts=$(date '+%H:%M:%S')
 			if [[ "${show_live_el}" == "true" ]]; then
-				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  LIVE EL BLOCK every ${LIVE_EL_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  LIVE EL BLOCK every ${LIVE_EL_REFRESH_SECONDS}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
 			else
-				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Press Ctrl+C to exit${RESET}"
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
 			fi
 			echo ""
 

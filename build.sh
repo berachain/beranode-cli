@@ -200,14 +200,15 @@ modules=(
 	"lib/download.sh"      # [4.10] Download utilities
 	"lib/network.sh"       # [4.11] Public-network mapping helpers
 	"lib/snapshots.sh"     # [4.12] Official snapshot download/restore
-	"commands/common.sh"   # [4.13] Common command utilities
-	"commands/init.sh"     # [4.14] Init command implementation
-	"commands/start.sh"    # [4.15] Start command implementation
-	"commands/stop.sh"     # [4.16] Stop command implementation
-	"commands/status.sh"   # [4.17] Status command implementation
-	"commands/validate.sh" # [4.18] Validate command implementation
-	"commands/snapshot.sh" # [4.19] Snapshot download/restore command
-	"core/dispatcher.sh"   # [4.20] Main dispatcher and entry point
+	"lib/serviceman.sh"    # [4.13] OS service manager (launchd)
+	"commands/common.sh"   # [4.14] Common command utilities
+	"commands/init.sh"     # [4.15] Init command implementation
+	"commands/start.sh"    # [4.16] Start command implementation
+	"commands/stop.sh"     # [4.17] Stop command implementation
+	"commands/status.sh"   # [4.18] Status command implementation
+	"commands/validate.sh" # [4.19] Validate command implementation
+	"commands/snapshot.sh" # [4.20] Snapshot download/restore command
+	"core/dispatcher.sh"   # [4.21] Main dispatcher and entry point
 )
 
 # Process each module

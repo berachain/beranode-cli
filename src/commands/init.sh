@@ -105,7 +105,10 @@ GENERAL OPTIONS:
     --pruned-nodes <count>          Number of pruned nodes (default: 0)
     --skip-snapshot                 Skip official snapshot download (public networks only)
     --snapshot-type <pruned|archive> Force one snapshot type for every node (default: role-mapped)
-    --docker                        Enable Docker mode
+    --mode <local|docker|serviceman> Process runtime (default: local)
+    --docker                        Enable Docker mode (alias for --mode docker)
+    --serviceman                    Enable serviceman mode (alias for --mode serviceman).
+                                    macOS: launchd user LaunchAgents; start/stop manage the service
     --wallet-private-key <key>      Private key for the wallet
     --wallet-address <address>      Wallet address
     --wallet-balance <amount>       Initial wallet balance
@@ -322,6 +325,60 @@ For more information, visit: https://github.com/berachain/beranode-cli2
 EOF
 }
 
+init_require_docker() {
+	if ! command -v docker &>/dev/null; then
+		log_error "Docker is not installed or not found in PATH. Please install Docker to continue."
+		exit 1
+	fi
+
+	if ! docker info &>/dev/null; then
+		log_error "Docker daemon is not running. Please start Docker to continue."
+		exit 1
+	fi
+
+	local docker_version docker_major docker_minor docker_patch
+	docker_version=$(docker version --format '{{.Server.Version}}')
+	if [[ -z "$docker_version" ]]; then
+		log_warn "Could not determine Docker version. Proceeding, but issues may occur."
+	else
+		if [[ "$docker_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+			docker_major="${BASH_REMATCH[1]}"
+			docker_minor="${BASH_REMATCH[2]}"
+			docker_patch="${BASH_REMATCH[3]}"
+			if ((docker_major < 20)) || { ((docker_major == 20)) && ((docker_minor < 10)); }; then
+				log_error "Docker version 20.10.0 or newer is required. Current version: $docker_version"
+				exit 1
+			fi
+		else
+			log_warn "Could not parse Docker version: $docker_version. Proceeding, but issues may occur."
+		fi
+	fi
+}
+
+# $1 requested mode  $2 previously chosen mode (empty if none)
+init_apply_mode() {
+	local requested="$1"
+	local previous="${2:-}"
+	if [[ -n "${previous}" && "${previous}" != "${requested}" ]]; then
+		log_error "Cannot combine modes '${previous}' and '${requested}'. Use one of: local, docker, serviceman."
+		exit 1
+	fi
+	case "${requested}" in
+	local)
+		;;
+	docker)
+		init_require_docker
+		;;
+	serviceman)
+		serviceman_require_launchd || exit 1
+		;;
+	*)
+		log_error "Unknown mode: ${requested}. Supported: local, docker, serviceman"
+		exit 1
+		;;
+	esac
+}
+
 # =============================================================================
 # SECTION 2: MAIN INIT COMMAND
 # =============================================================================
@@ -390,6 +447,7 @@ cmd_init() {
 	local docker_tag_beacond="latest"
 	local docker_tag_berareth="latest"
 	local mode="local"
+	local mode_from_flag=""
 	local wallet_private_key=""
 	local wallet_address=""
 	local wallet_balance=${DEFAULT_WALLET_BALANCE}
@@ -651,39 +709,27 @@ cmd_init() {
 			shift 2
 			;;
 		--docker)
+			init_apply_mode "docker" "${mode_from_flag}"
 			docker_mode=true
 			mode="docker"
-			# Check if Docker is installed
-			if ! command -v docker &>/dev/null; then
-				log_error "Docker is not installed or not found in PATH. Please install Docker to continue."
-				exit 1
-			fi
-
-			# Check if Docker daemon is running
-			if ! docker info &>/dev/null; then
-				log_error "Docker daemon is not running. Please start Docker to continue."
-				exit 1
-			fi
-
-			# Check Docker version is at least 20.10.0
-			docker_version=$(docker version --format '{{.Server.Version}}')
-			if [[ -z "$docker_version" ]]; then
-				log_warn "Could not determine Docker version. Proceeding, but issues may occur."
-			else
-				if [[ "$docker_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-					docker_major="${BASH_REMATCH[1]}"
-					docker_minor="${BASH_REMATCH[2]}"
-					docker_patch="${BASH_REMATCH[3]}"
-					# Compare version (minimum required: 20.10.0)
-					if ((docker_major < 20)) || { ((docker_major == 20)) && ((docker_minor < 10)); }; then
-						log_error "Docker version 20.10.0 or newer is required. Current version: $docker_version"
-						exit 1
-					fi
-				else
-					log_warn "Could not parse Docker version: $docker_version. Proceeding, but issues may occur."
-				fi
-			fi
+			mode_from_flag="docker"
 			shift
+			;;
+		--serviceman)
+			init_apply_mode "serviceman" "${mode_from_flag}"
+			mode="serviceman"
+			mode_from_flag="serviceman"
+			shift
+			;;
+		--mode)
+			if [[ -z "${2:-}" || "${2}" == --* ]]; then
+				log_error "--mode requires one of: local, docker, serviceman"
+				exit 1
+			fi
+			init_apply_mode "$2" "${mode_from_flag}"
+			mode="$2"
+			mode_from_flag="$2"
+			shift 2
 			;;
 		--docker-tag-berareth)
 			if [[ -n "$2" ]]; then
@@ -2331,6 +2377,10 @@ cmd_init() {
 	echo "Snapshot Type:   ${snapshot_type:-role-mapped}"
 	echo "Force:           ${force:-false}"
 	echo "Mode:            ${mode}"
+	if [[ "${mode}" == "serviceman" ]]; then
+		echo "Service manager: launchd (user LaunchAgents)"
+		echo "                 beranode start/stop load and unload the service"
+	fi
 	echo "=========================================="
 	echo ""
 
@@ -2357,6 +2407,11 @@ cmd_init() {
 		read -p "Do you want to remove and re-initialize? (y/n): " confirm_override
 		case "$confirm_override" in
 		y | Y | yes | Yes | YES)
+			# Unload launchd jobs before deleting the tree so leftover LaunchAgents
+			# do not keep running against a wiped data dir.
+			if [[ "${IS_MACOS}" == "true" ]] && command -v launchctl >/dev/null 2>&1; then
+				serviceman_stop_all "${BERANODES_PATH}" || true
+			fi
 			if [[ "${preserve_snapshots}" == true ]]; then
 				log_info "Removing existing beranodes directory (preserving snapshots): ${BERANODES_PATH}"
 				find "${BERANODES_PATH}" -mindepth 1 -maxdepth 1 \
@@ -2384,6 +2439,9 @@ cmd_init() {
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_NODES}" "beranode nodes directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_RUNS}" "beranode runs directory" || return 1
 	ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_SNAPSHOTS}" "beranode snapshots directory" || return 1
+	if [[ "$mode" == "serviceman" ]]; then
+		ensure_dir_exists "${BERANODES_PATH}${BERANODES_PATH_SERVICES}" "beranode services directory" || return 1
+	fi
 
 	# =========================================================================
 	# [6] BINARY VERIFICATION
@@ -2393,7 +2451,7 @@ cmd_init() {
 	local docker_berareth_tag="${docker_berareth_tag:-}"
 
 	# Verify beacond and bera-reth binaries exist and are executable
-	if [[ "$mode" == "local" ]]; then
+	if [[ "$mode" == "local" || "$mode" == "serviceman" ]]; then
 		missing_binaries=0
 		# - beacond
 		is_beacond_installed=false

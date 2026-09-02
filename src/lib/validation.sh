@@ -182,12 +182,12 @@ validate_comet_address() {
 	[[ "$value" =~ ^[0-9A-F]{40}$ ]]
 }
 
-# Validates mode (local, dev, testnet, mainnet)
+# Validates process-runtime mode (local, docker, serviceman)
 # Parameters: $1 - value to validate
 # Returns: 0 if valid, 1 if invalid
 validate_mode() {
 	local value="$1"
-	[[ "$value" =~ ^(local|docker)$ ]]
+	[[ "$value" =~ ^(local|docker|serviceman)$ ]]
 }
 
 # Validates role (validator, full_node, pruned_node)

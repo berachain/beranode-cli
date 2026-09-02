@@ -143,4 +143,12 @@ assert_failure 'validate_duration s' "Missing number"
 assert_failure 'validate_duration 1x' "Invalid unit"
 assert_failure 'validate_duration ""' "Empty duration"
 
+test_suite "Mode Validation"
+
+assert_success 'validate_mode local' "local is valid"
+assert_success 'validate_mode docker' "docker is valid"
+assert_success 'validate_mode serviceman' "serviceman is valid"
+assert_failure 'validate_mode systemd' "systemd is not a mode value"
+assert_failure 'validate_mode ""' "empty mode is invalid"
+
 print_results

@@ -9,12 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Summary
 
-Public-network `bera-reth` start is opt-in for bootnodes, trusted peers, and websocket RPC (discovery uses the `--chain` preset). Init no longer mixes RPC nodes with validators on bepolia/mainnet, and bepolia's recommended beacond is `v1.4.1`. Wallet generation and path validation work with current Foundry and GNU bash.
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.11.0] - 2026-09-02
+
+### Summary
+
+macOS `serviceman` mode runs the same native binaries as local under launchd. `beranode status` reports host storage and can emit JSON. Public-network `bera-reth` start is opt-in for bootnodes, trusted peers, and websocket RPC (discovery uses the `--chain` preset). Init no longer mixes RPC nodes with validators on bepolia/mainnet, and bepolia's recommended beacond is `v1.4.1`. Wallet generation and path validation work with current Foundry and GNU bash.
 
 ### Added
 
-- `beranode start --bootnodes` and `--trusted-peers` to pass EL enodes when you want them (local and Docker)
-- `beranode start --ws` to enable the EL websocket RPC, with optional `--ws.addr`, `--ws.port`, and `--ws.origin` overrides (local and Docker; Docker maps the WS port only when `--ws` is set)
+- `beranode init --mode serviceman` and `--serviceman`: same native binaries as local mode, with `"mode": "serviceman"` in `beranodes.config.json`. macOS-only (launchd); Linux systemd is not implemented yet (init fails instead of falling back to local)
+- `beranode start` / `stop` in serviceman mode load and unload user LaunchAgents (`~/Library/LaunchAgents/com.berachain.beranode.*`). Jobs use `KeepAlive` and `RunAtLoad` (10s throttle); `stop` removes those LaunchAgents so they do not restart at login. Logs use `beranodes/logs/` via launchd `StandardOutPath` / `StandardErrorPath`; plist copies and `launchd.json` live in `beranodes/services/`
+- `beranode init --mode local|docker|serviceman` as the canonical mode flag (`--docker` and `--serviceman` remain shorthands). Combining modes is rejected
+- `beranode start --bootnodes` and `--trusted-peers` to pass EL enodes when you want them (local, Docker, and serviceman)
+- `beranode start --ws` to enable the EL websocket RPC, with optional `--ws.addr`, `--ws.port`, and `--ws.origin` overrides (local, Docker, and serviceman; Docker maps the WS port only when `--ws` is set)
+- `beranode start --logs-reset` to remove existing files in `beranodes/logs` without prompting (answers `y` to the log-reset prompt)
+- `beranode status` Storage footer: total volume capacity, device used, and `beranodes/nodes` size (macOS APFS container via diskutil with df fallback; Linux df). In `--watch`, storage is refreshed every 30 seconds
+- `beranode status --json` for a machine-readable snapshot of network, nodes, and storage (incompatible with `--watch`)
+- `beranode status` in serviceman mode reports launchd job state (`running` / `stopped` / `offline`) for beacond and bera-reth
 
 ### Changed
 
@@ -22,6 +45,8 @@ Public-network `bera-reth` start is opt-in for bootnodes, trusted peers, and web
 - `bera-reth` no longer includes `--ws`, `--ws.addr`, `--ws.port`, or `--ws.origins` unless `beranode start --ws` is set
 - Recommended beacond for bepolia is `v1.4.1` (was `v1.4.2-rc.0`)
 - `beranode init --network bepolia|mainnet` with `--full-nodes` or `--pruned-nodes` forces `--validators` to 0 so public RPC nodes are not created as validators
+- `beranode init` unloads leftover LaunchAgents for the target directory before wiping it on re-init
+- `beranode snapshot` treats serviceman launchd jobs as running nodes (blocks restore while they are up)
 
 ### Deprecated
 
@@ -32,6 +57,7 @@ Public-network `bera-reth` start is opt-in for bootnodes, trusted peers, and web
 - `cast wallet new --json` parsing accepts both the current object shape (`.data[0].private_key`) and the legacy array shape (`.[0].private_key`), so EVM wallet generation and bera-reth discovery keys work with newer Foundry
 - `validate_path` no longer uses `=~ $'\0'`, which GNU bash treats as an empty regex and rejected every path (including `beranode_dir`)
 - `beranode status` BLOCK AGE now treats CometBFT timestamps as UTC on macOS, so a synced node no longer shows an age equal to the local timezone offset
+- Local/devnet `bera-reth` mesh uses `127.0.0.1` in `--bootnodes` / `--trusted-peers` (reth cannot dial `localhost`, which may be `::1`) and `--disable-dns-discovery` (local, Docker, and serviceman) so nodes peer with each other instead of public bootnodes
 
 ### Security
 
@@ -408,7 +434,9 @@ Add version management with description support and changelog automation
 - Node management commands
 - Network configuration support
 
-[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/berachain/beranode-cli/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/berachain/beranode-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/berachain/beranode-cli/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/berachain/beranode-cli/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/berachain/beranode-cli/compare/v0.8.0...v0.7.1

@@ -16,6 +16,9 @@ networks defined in the generated docker-compose.yml.
 
 In local mode, stops processes by their PIDs stored in the runs directory.
 
+In serviceman mode, unloads launchd jobs (macOS) and removes user LaunchAgents
+for this node set. Copies of the plists remain in beranodes/services/.
+
 Options:
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
@@ -80,11 +83,22 @@ cmd_stop() {
 	# -------------------------------------------------------------------------
 	# [STEP 3] Stop nodes based on mode
 	# -------------------------------------------------------------------------
-	if [[ "${mode}" == "docker" ]]; then
+	case "${mode}" in
+	docker)
 		_stop_docker_mode "${beranodes_dir}"
-	else
+		;;
+	serviceman)
+		_stop_serviceman_mode "${beranodes_dir}"
+		;;
+	local)
 		_stop_local_mode "${beranodes_dir}"
-	fi
+		;;
+	*)
+		log_error "Unsupported mode: ${mode}"
+		log_error "Supported modes: local, docker, serviceman"
+		return 1
+		;;
+	esac
 }
 
 # =============================================================================
@@ -199,4 +213,16 @@ _stop_local_mode() {
 	pkill -f bera-reth || true
 
 	log_success "Stopped ${#pid_files[@]} nodes"
+}
+
+# =============================================================================
+# [SECTION 5] Serviceman Mode Stop (launchd)
+# =============================================================================
+
+_stop_serviceman_mode() {
+	local beranodes_dir="$1"
+
+	log_info "Mode: serviceman"
+	serviceman_require_launchd || return 1
+	serviceman_stop_all "${beranodes_dir}"
 }

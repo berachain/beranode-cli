@@ -20,6 +20,11 @@
 #   Test 15: --help mentions watch/interval
 #   Test 16: LIVE EL BLOCK column (bepolia/mainnet only; omitted on devnet)
 #   Test 17: format_block_age treats CometBFT timestamps as UTC
+#   Test 18: Storage footer (total / device used / nodes directory)
+#   Test 19: --json output (valid JSON with storage + nodes)
+#   Test 20: --json is incompatible with --watch
+#   Test 21: --help mentions --json and Storage
+#   Test 22: status_comma / status_percent / status_diskutil_field helpers
 #
 # Usage: ./tests/test_status.sh
 # =============================================================================
@@ -413,6 +418,18 @@ else
     fail_test "--help missing LIVE EL BLOCK"
 fi
 
+if echo "$output" | grep -q "\-\-json"; then
+    pass_test "--help mentions --json option"
+else
+    fail_test "--help missing --json option"
+fi
+
+if echo "$output" | grep -qi "storage"; then
+    pass_test "--help mentions Storage"
+else
+    fail_test "--help missing Storage"
+fi
+
 # ─── Test 6: Missing config file ────────────────────────────────────────────
 log_header "Test 6: Missing config file error handling"
 
@@ -804,6 +821,215 @@ if [[ "${age_empty}" == "--" ]]; then
     pass_test "Missing block time formats as --"
 else
     fail_test "Missing block time should be '--', got '${age_empty}'"
+fi
+
+# ─── Test 18: Storage footer ────────────────────────────────────────────────
+log_header "Test 18: Storage footer"
+
+TEST18_DIR=$(mktemp -d)
+create_test_config "${TEST18_DIR}" "local" 1 0
+mkdir -p "${TEST18_DIR}/nodes"
+# ~20 MiB so du reports a non-zero nodes directory size in 0.01 GB units
+dd if=/dev/zero of="${TEST18_DIR}/nodes/blob" bs=1024 count=20480 2>/dev/null
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST18_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep -q "Storage:"; then
+    pass_test "Storage section present"
+else
+    fail_test "Storage section missing"
+fi
+
+if echo "$output" | grep -q "Total space:"; then
+    pass_test "Total space line present"
+else
+    fail_test "Total space line missing"
+fi
+
+if echo "$output" | grep -q "Device used:"; then
+    pass_test "Device used line present"
+else
+    fail_test "Device used line missing"
+fi
+
+if echo "$output" | grep -q "Nodes directory:"; then
+    pass_test "Nodes directory line present"
+else
+    fail_test "Nodes directory line missing"
+fi
+
+if echo "$output" | grep "Total space:" | grep -qE "[0-9]+(,[0-9]{3})* GB"; then
+    pass_test "Total space shows GB"
+else
+    fail_test "Total space missing GB value"
+fi
+
+if echo "$output" | grep "Device used:" | grep -qE "GB \([0-9]+\.[0-9]+%\)"; then
+    pass_test "Device used shows GB and percent"
+else
+    fail_test "Device used missing GB (percent) value"
+fi
+
+if echo "$output" | grep "Nodes directory:" | grep -qE "[0-9]+\.[0-9]+ GB \([0-9]+\.[0-9]+%\)"; then
+    pass_test "Nodes directory shows GB and percent"
+else
+    fail_test "Nodes directory missing GB (percent) value"
+fi
+
+if echo "$output" | grep "Nodes directory:" | grep -q "0.00 GB"; then
+    fail_test "Nodes directory should be non-zero GB when nodes/ has data: $(echo "$output" | grep "Nodes directory:")"
+elif echo "$output" | grep "Nodes directory:" | grep -qE "[0-9]+\.[0-9]+ GB \([0-9]+\.[0-9]+%\)"; then
+    pass_test "Nodes directory shows a non-zero GB size"
+else
+    fail_test "Nodes directory missing GB (percent) value"
+fi
+
+rm -rf "${TEST18_DIR}"
+
+# ─── Test 19: --json output ─────────────────────────────────────────────────
+log_header "Test 19: --json output"
+
+TEST19_DIR=$(mktemp -d)
+create_test_config "${TEST19_DIR}" "local" 1 0
+mkdir -p "${TEST19_DIR}/nodes"
+dd if=/dev/zero of="${TEST19_DIR}/nodes/blob" bs=1024 count=20480 2>/dev/null
+
+json_output=$(cd "${PROJECT_DIR}" && ./beranode status --json --beranodes-dir "${TEST19_DIR}" 2>&1) || true
+echo "$json_output"
+
+if echo "$json_output" | jq empty 2>/dev/null && echo "$json_output" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    pass_test "--json emits valid JSON"
+else
+    fail_test "--json did not emit valid JSON"
+fi
+
+if echo "$json_output" | jq -e '.network == "devnet"' >/dev/null 2>&1; then
+    pass_test "--json includes network"
+else
+    fail_test "--json missing network"
+fi
+
+if echo "$json_output" | jq -e '.nodes | length == 1' >/dev/null 2>&1; then
+    pass_test "--json has one node"
+else
+    fail_test "--json node count mismatch"
+fi
+
+if echo "$json_output" | jq -e '.nodes[0].moniker == "test-node-val-0"' >/dev/null 2>&1; then
+    pass_test "--json node moniker matches"
+else
+    fail_test "--json node moniker mismatch"
+fi
+
+if echo "$json_output" | jq -e '.nodes[0].el.status == "offline"' >/dev/null 2>&1; then
+    pass_test "--json EL status is offline for synthetic config"
+else
+    fail_test "--json EL status mismatch"
+fi
+
+if echo "$json_output" | jq -e '.nodes[0].el.block == null' >/dev/null 2>&1; then
+    pass_test "--json missing EL block is null (not \"--\")"
+else
+    fail_test "--json missing EL block should be null"
+fi
+
+if echo "$json_output" | jq -e '.live_el_block == null' >/dev/null 2>&1; then
+    pass_test "--json omits live EL block on devnet (null)"
+else
+    fail_test "--json live_el_block should be null on devnet"
+fi
+
+if echo "$json_output" | jq -e '.storage.total_bytes > 0' >/dev/null 2>&1; then
+    pass_test "--json storage.total_bytes > 0"
+else
+    fail_test "--json storage.total_bytes missing or zero"
+fi
+
+if echo "$json_output" | jq -e '.storage.nodes_bytes > 0' >/dev/null 2>&1; then
+    pass_test "--json storage.nodes_bytes > 0"
+else
+    fail_test "--json storage.nodes_bytes missing or zero"
+fi
+
+if echo "$json_output" | jq -e '.storage.path | endswith("/nodes")' >/dev/null 2>&1; then
+    pass_test "--json storage.path ends with /nodes"
+else
+    fail_test "--json storage.path should end with /nodes"
+fi
+
+# Table chrome must not leak into JSON mode
+if echo "$json_output" | grep -q "Beranode Status"; then
+    fail_test "--json should not include table header"
+else
+    pass_test "--json has no table header"
+fi
+
+rm -rf "${TEST19_DIR}"
+
+# ─── Test 20: --json incompatible with --watch ──────────────────────────────
+log_header "Test 20: --json cannot be used with --watch"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --json --watch 2>&1) || true
+if echo "$output" | grep -qi "json.*watch\|watch.*json"; then
+    pass_test "--json --watch shows incompatibility error"
+else
+    fail_test "--json --watch did not show incompatibility error"
+fi
+
+# ─── Test 21: --help mentions --json (also covered in Test 5) ───────────────
+# (assertions live in Test 5)
+
+# ─── Test 22: storage helper unit tests ─────────────────────────────────────
+log_header "Test 22: status_comma / status_percent / status_diskutil_field"
+
+helper_out=$(
+    eval "$(sed -n '/^status_comma()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_percent()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_diskutil_field()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    echo "comma:$(status_comma 7999)"
+    echo "pct1:$(status_percent 1970260938752 7998551654400 1)"
+    echo "pct2:$(status_percent 12540000000 7998551654400 2)"
+    echo "pct0:$(status_percent 1 0 1)"
+    fixture=$'   Container Total Space:     8.0 TB (7998551654400 Bytes) (exactly 15622171200 512-Byte-Units)\n   Container Free Space:      6.0 TB (6028290715648 Bytes) (exactly 11774005304 512-Byte-Units)'
+    echo "total:$(status_diskutil_field "$fixture" "Container Total Space")"
+    echo "free:$(status_diskutil_field "$fixture" "Container Free Space")"
+)
+
+if echo "$helper_out" | grep -q "comma:7,999"; then
+    pass_test "status_comma 7999 → 7,999"
+else
+    fail_test "status_comma failed: $(echo "$helper_out" | grep comma)"
+fi
+
+if echo "$helper_out" | grep -q "pct1:24.6"; then
+    pass_test "status_percent 1 decimal is 24.6"
+else
+    fail_test "status_percent 1 decimal failed: $(echo "$helper_out" | grep pct1)"
+fi
+
+if echo "$helper_out" | grep -q "pct2:0.16"; then
+    pass_test "status_percent 2 decimals is 0.16"
+else
+    fail_test "status_percent 2 decimals failed: $(echo "$helper_out" | grep pct2)"
+fi
+
+if echo "$helper_out" | grep -q "pct0:--"; then
+    pass_test "status_percent whole=0 is --"
+else
+    fail_test "status_percent zero-whole failed: $(echo "$helper_out" | grep pct0)"
+fi
+
+if echo "$helper_out" | grep -q "total:7998551654400"; then
+    pass_test "status_diskutil_field parses Container Total Space"
+else
+    fail_test "status_diskutil_field total failed: $(echo "$helper_out" | grep total)"
+fi
+
+if echo "$helper_out" | grep -q "free:6028290715648"; then
+    pass_test "status_diskutil_field parses Container Free Space"
+else
+    fail_test "status_diskutil_field free failed: $(echo "$helper_out" | grep free)"
 fi
 
 # =============================================================================

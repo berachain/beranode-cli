@@ -345,6 +345,17 @@ assert_equals "enode://local@127.0.0.1:30303" \
 assert_equals "enode://local@127.0.0.1:30303,enode://explicit@9.9.9.9:30303" \
 	"$(resolve_reth_enodes devnet "enode://local@127.0.0.1:30303" "enode://explicit@9.9.9.9:30303")" \
 	"devnet merges local cluster with explicit override"
+
+assert_equals "enode://aaa@127.0.0.1:30303,enode://bbb@127.0.0.1:30403" \
+	"$(format_reth_enodes_at_host 127.0.0.1 aaa 30303 bbb 30403)" \
+	"formats cluster enodes at 127.0.0.1 (not localhost)"
+assert_equals "enode://aaa@0-val-bera-reth:30303" \
+	"$(format_reth_enodes_at_host 0-val-bera-reth aaa 30303)" \
+	"formats a docker service-name enode"
+assert_empty "$(format_reth_enodes_at_host 127.0.0.1)" \
+	"no pubkey/port pairs yields empty"
+assert_empty "$(format_reth_enodes_at_host "")" \
+	"empty host yields empty"
 rm -rf "$ENODE_DIR"
 
 test_suite "EL websocket flags"

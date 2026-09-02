@@ -2,7 +2,7 @@
 # Command Dispatcher - Core Routing Module
 # =============================================================================
 #
-# VERSION: v0.10.0 (Current)
+# VERSION: v0.11.0 (Current)
 #
 # PURPOSE:
 #   This module serves as the central command router for the beranode CLI,
@@ -68,6 +68,7 @@ OPTIONS:
 
 EXAMPLES:
     beranode init --network bepolia --validators 1
+    beranode init --network bepolia --pruned-nodes 1 --serviceman
     beranode snapshot download --network bepolia
     beranode start
     beranode status
