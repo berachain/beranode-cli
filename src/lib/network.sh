@@ -254,6 +254,41 @@ merge_enodes() {
 	echo "$out"
 }
 
+# Resolve bera-reth --bootnodes / --trusted-peers.
+# Public networks omit auto-injected lists so reth uses its --chain preset
+# unless the user passed an explicit override.
+resolve_reth_enodes() {
+	local network="${1:-}"
+	local local_enodes="${2:-}"
+	local explicit_enodes="${3:-}"
+	if is_public_network "${network}"; then
+		echo "${explicit_enodes}"
+	else
+		merge_enodes "${local_enodes}" "${explicit_enodes}"
+	fi
+}
+
+# Newline-separated bera-reth websocket flags. Empty when --ws is not enabled.
+# Defaults when enabled: --ws.addr=0.0.0.0, --ws.port=<default_port>, --ws.origins=*
+format_reth_ws_flags() {
+	local enabled="${1:-}"
+	local addr="${2:-}"
+	local port="${3:-}"
+	local origins="${4:-}"
+	local default_port="${5:-$DEFAULT_EL_WS_PORT}"
+	if [[ "${enabled}" != "true" ]]; then
+		return 0
+	fi
+	[[ -z "${addr}" ]] && addr="0.0.0.0"
+	[[ -z "${port}" ]] && port="${default_port}"
+	[[ -z "${origins}" ]] && origins="*"
+	printf '%s\n' \
+		"--ws" \
+		"--ws.addr=${addr}" \
+		"--ws.port=${port}" \
+		"--ws.origins=${origins}"
+}
+
 # Download missing official EL bootnodes/peers so older inits still join on start.
 ensure_el_enode_files() {
 	local network="$1"

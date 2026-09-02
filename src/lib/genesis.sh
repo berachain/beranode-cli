@@ -1395,7 +1395,24 @@ generate_base_beacond_config() {
 
 		# Add bera-reth config
 		# - Placeholder
-		private_key="$(cast wallet new --json | jq -r '.[0].private_key')"
+    local cast_json
+    cast_json="$(cast wallet new --json)"
+    local json_type
+    json_type="$(echo "$cast_json" | jq -r 'type')"
+
+    local private_key=""
+    if [[ "$json_type" == "object" ]]; then
+      # Object: expect .data to be an array, use .data[0].private_key
+      private_key="$(echo "$cast_json" | jq -r '.data[0].private_key')"
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is object, using .data[0].private_key: $private_key" >&2
+    elif [[ "$json_type" == "array" ]]; then
+      # Array: legacy cast format, use .[0].private_key
+      private_key="$(echo "$cast_json" | jq -r '.[0].private_key')"
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is array, using .[0].private_key: $private_key" >&2
+    else
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Unexpected JSON output type: $json_type" >&2
+    fi
+
 		public_key="$(cast wallet public-key --private-key ${private_key})"
 		berareth_config="{
       \"private_key\": \"$(echo "${private_key}" | sed 's/^0x//')\",

@@ -2303,6 +2303,14 @@ cmd_init() {
 			berareth_version="$(network_recommended_berareth_version "${network}")"
 			log_info "Using recommended bera-reth version for ${network}: ${berareth_version}"
 		fi
+		# RPC nodes on public networks are not validators.
+		if [[ "${full_nodes:-0}" -gt 0 || "${pruned_nodes:-0}" -gt 0 ]]; then
+			if [[ "${validators:-0}" -gt 0 ]]; then
+				log_warn "Public network ${network} with --full-nodes/--pruned-nodes: setting validators to 0 (was ${validators})."
+			fi
+			validators=0
+			total_nodes=$(((${validators:-0} + ${full_nodes:-0} + ${pruned_nodes:-0})))
+		fi
 		if [[ "${validators}" -gt 0 ]]; then
 			log_warn "Validator nodes on ${network} receive keys (priv_validator_key.json) but are NOT in the public validator set."
 			log_warn "They will sync as full consensus participants until you deposit separately. This CLI does not automate the deposit."

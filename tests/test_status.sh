@@ -19,6 +19,7 @@
 #   Test 14: --watch/--interval flag parsing
 #   Test 15: --help mentions watch/interval
 #   Test 16: LIVE EL BLOCK column (bepolia/mainnet only; omitted on devnet)
+#   Test 17: format_block_age treats CometBFT timestamps as UTC
 #
 # Usage: ./tests/test_status.sh
 # =============================================================================
@@ -776,6 +777,34 @@ else
 fi
 
 rm -rf "${TEST16B_DIR}"
+
+# ─── Test 17: format_block_age treats CometBFT timestamps as UTC ─────────────
+log_header "Test 17: format_block_age UTC parsing"
+
+age_now=$(
+    if [[ "$(uname)" == "Darwin" ]]; then IS_MACOS=true; else IS_MACOS=false; fi
+    eval "$(sed -n '/^format_block_age()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    now_utc=$(date -u +"%Y-%m-%dT%H:%M:%S.123456789Z")
+    format_block_age "${now_utc}"
+)
+
+if [[ "${age_now}" =~ ^[0-9]+s\ ago$ ]]; then
+    pass_test "Current UTC timestamp is seconds old, not timezone-offset hours (${age_now})"
+else
+    fail_test "Current UTC timestamp should be 'Ns ago', got '${age_now}'"
+fi
+
+age_empty=$(
+    if [[ "$(uname)" == "Darwin" ]]; then IS_MACOS=true; else IS_MACOS=false; fi
+    eval "$(sed -n '/^format_block_age()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    format_block_age "--"
+)
+
+if [[ "${age_empty}" == "--" ]]; then
+    pass_test "Missing block time formats as --"
+else
+    fail_test "Missing block time should be '--', got '${age_empty}'"
+fi
 
 # =============================================================================
 # Summary

@@ -209,7 +209,7 @@ readonly LIVE_EL_REFRESH_SECONDS=10
 readonly SEED_DATA_BASE_URL="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks"
 
 # Recommended client versions per public network (docs; will drift — override with flags).
-readonly RECOMMENDED_BEACOND_VERSION_BEPOLIA="v1.4.2-rc.0"
+readonly RECOMMENDED_BEACOND_VERSION_BEPOLIA="v1.4.1"
 readonly RECOMMENDED_BERARETH_VERSION_BEPOLIA="v1.4.4"
 readonly RECOMMENDED_BEACOND_VERSION_MAINNET="v1.4.1"
 readonly RECOMMENDED_BERARETH_VERSION_MAINNET="v1.4.4"
@@ -2591,8 +2591,9 @@ validate_jwt() {
 # Returns: 0 if valid, 1 if invalid
 validate_path() {
 	local value="$1"
-	# Path must be non-empty and not contain null bytes
-	[[ -n "$value" && ! "$value" =~ $'\0' ]]
+	# Bash strings cannot contain NUL. Do not use =~ $'\0': GNU bash treats
+	# that as an empty regex, which matches every string, so every path fails.
+	[[ -n "$value" ]]
 }
 
 # Validates a URL (http, https, tcp, ws, wss)
@@ -4261,7 +4262,24 @@ generate_base_beacond_config() {
 
 		# Add bera-reth config
 		# - Placeholder
-		private_key="$(cast wallet new --json | jq -r '.[0].private_key')"
+    local cast_json
+    cast_json="$(cast wallet new --json)"
+    local json_type
+    json_type="$(echo "$cast_json" | jq -r 'type')"
+
+    local private_key=""
+    if [[ "$json_type" == "object" ]]; then
+      # Object: expect .data to be an array, use .data[0].private_key
+      private_key="$(echo "$cast_json" | jq -r '.data[0].private_key')"
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is object, using .data[0].private_key: $private_key" >&2
+    elif [[ "$json_type" == "array" ]]; then
+      # Array: legacy cast format, use .[0].private_key
+      private_key="$(echo "$cast_json" | jq -r '.[0].private_key')"
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] JSON type is array, using .[0].private_key: $private_key" >&2
+    else
+      [[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Unexpected JSON output type: $json_type" >&2
+    fi
+
 		public_key="$(cast wallet public-key --private-key ${private_key})"
 		berareth_config="{
       \"private_key\": \"$(echo "${private_key}" | sed 's/^0x//')\",
@@ -5673,6 +5691,41 @@ merge_enodes() {
 		fi
 	done
 	echo "$out"
+}
+
+# Resolve bera-reth --bootnodes / --trusted-peers.
+# Public networks omit auto-injected lists so reth uses its --chain preset
+# unless the user passed an explicit override.
+resolve_reth_enodes() {
+	local network="${1:-}"
+	local local_enodes="${2:-}"
+	local explicit_enodes="${3:-}"
+	if is_public_network "${network}"; then
+		echo "${explicit_enodes}"
+	else
+		merge_enodes "${local_enodes}" "${explicit_enodes}"
+	fi
+}
+
+# Newline-separated bera-reth websocket flags. Empty when --ws is not enabled.
+# Defaults when enabled: --ws.addr=0.0.0.0, --ws.port=<default_port>, --ws.origins=*
+format_reth_ws_flags() {
+	local enabled="${1:-}"
+	local addr="${2:-}"
+	local port="${3:-}"
+	local origins="${4:-}"
+	local default_port="${5:-$DEFAULT_EL_WS_PORT}"
+	if [[ "${enabled}" != "true" ]]; then
+		return 0
+	fi
+	[[ -z "${addr}" ]] && addr="0.0.0.0"
+	[[ -z "${port}" ]] && port="${default_port}"
+	[[ -z "${origins}" ]] && origins="*"
+	printf '%s\n' \
+		"--ws" \
+		"--ws.addr=${addr}" \
+		"--ws.port=${port}" \
+		"--ws.origins=${origins}"
 }
 
 # Download missing official EL bootnodes/peers so older inits still join on start.
@@ -8740,6 +8793,14 @@ cmd_init() {
 			berareth_version="$(network_recommended_berareth_version "${network}")"
 			log_info "Using recommended bera-reth version for ${network}: ${berareth_version}"
 		fi
+		# RPC nodes on public networks are not validators.
+		if [[ "${full_nodes:-0}" -gt 0 || "${pruned_nodes:-0}" -gt 0 ]]; then
+			if [[ "${validators:-0}" -gt 0 ]]; then
+				log_warn "Public network ${network} with --full-nodes/--pruned-nodes: setting validators to 0 (was ${validators})."
+			fi
+			validators=0
+			total_nodes=$(((${validators:-0} + ${full_nodes:-0} + ${pruned_nodes:-0})))
+		fi
 		if [[ "${validators}" -gt 0 ]]; then
 			log_warn "Validator nodes on ${network} receive keys (priv_validator_key.json) but are NOT in the public validator set."
 			log_warn "They will sync as full consensus participants until you deposit separately. This CLI does not automate the deposit."
@@ -9649,11 +9710,24 @@ Options:
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
   --external-ip <ip>        Public IP advertised to peers (public networks)
+  --bootnodes <enodes>      Comma-separated EL bootnodes (public networks omit
+                            --bootnodes unless this is set)
+  --trusted-peers <enodes>  Comma-separated EL trusted peers (public networks
+                            omit --trusted-peers unless this is set)
+  --ws                      Enable the EL websocket RPC (--ws, --ws.addr,
+                            --ws.port, --ws.origins). Omitted unless set
+  --ws.addr <addr>          Websocket bind address (requires --ws;
+                            default: 0.0.0.0)
+  --ws.port <port>          Websocket port (requires --ws; default: 8546
+                            or the node's el_ws_port)
+  --ws.origin <origins>     Websocket allowed origins (requires --ws;
+                            default: *). Alias: --ws.origins
   --help|-h                 Display this help message
 
 Examples:
   beranode start
   beranode start --beranodes-dir /custom/path
+  beranode start --ws
   beranode start --help
 
 EOF
@@ -9713,6 +9787,12 @@ print_node_ports() {
 #   $2 - config_json_path: Path to beranodes.config.json
 #   $3 - docker_beacond_tag: Docker image tag for beacond
 #   $4 - docker_berareth_tag: Docker image tag for bera-reth
+#   $5 - explicit_bootnodes: Optional --bootnodes override
+#   $6 - explicit_trusted_peers: Optional --trusted-peers override
+#   $7 - enable_ws: "true" to include --ws and related flags
+#   $8 - explicit_ws_addr: Optional --ws.addr override
+#   $9 - explicit_ws_port: Optional --ws.port override
+#   $10 - explicit_ws_origins: Optional --ws.origin override
 #
 # Output:
 #   Creates docker-compose.yml in beranodes/tmp/
@@ -9722,6 +9802,12 @@ generate_docker_compose() {
 	local config_json_path="$2"
 	local docker_beacond_tag="$3"
 	local docker_berareth_tag="$4"
+	local explicit_bootnodes="${5:-}"
+	local explicit_trusted_peers="${6:-}"
+	local enable_ws="${7:-false}"
+	local explicit_ws_addr="${8:-}"
+	local explicit_ws_port="${9:-}"
+	local explicit_ws_origins="${10:-}"
 	
 	local compose_file="${beranodes_dir}/tmp/docker-compose.yml"
 	local nodes_count=$(jq -r '.total_nodes' "${config_json_path}")
@@ -9731,14 +9817,8 @@ generate_docker_compose() {
 	local snapshot_override
 	snapshot_override=$(jq -r '.snapshot_type // empty' "${config_json_path}")
 	local reth_chain_value="/root/.bera-reth/eth-genesis.json"
-	local official_bootnodes=""
-	local official_peers=""
 	if is_public_network "${compose_network}"; then
 		reth_chain_value="$(network_reth_chain "${compose_network}")"
-		local seed_dir="${beranodes_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${compose_network}")"
-		ensure_el_enode_files "${compose_network}" "${seed_dir}" || true
-		official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
-		official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
 	fi
 	
 	log_info "Generating docker-compose.yml for ${nodes_count} node(s)..."
@@ -9814,8 +9894,8 @@ EOF
 			berareth_bootnodes=$(IFS=,; echo "${bootnode_list[*]}")
 			berareth_trusted_peers="${berareth_bootnodes}"
 		fi
-		berareth_bootnodes="$(merge_enodes "${berareth_bootnodes}" "${official_bootnodes}")"
-		berareth_trusted_peers="$(merge_enodes "${berareth_trusted_peers}" "${official_peers}")"
+		berareth_bootnodes="$(resolve_reth_enodes "${compose_network}" "${berareth_bootnodes}" "${explicit_bootnodes}")"
+		berareth_trusted_peers="$(resolve_reth_enodes "${compose_network}" "${berareth_trusted_peers}" "${explicit_trusted_peers}")"
 		
 		# =================================================================
 		# Generate bera-reth service (execution layer - starts first)
@@ -9832,7 +9912,15 @@ EOF
       - beranet
     ports:
       - "${el_ethrpc_port}:8545"
-      - "${el_ws_port}:8546"
+EOF
+		if [[ "${enable_ws}" == "true" ]]; then
+			local ws_host_port="${explicit_ws_port:-${el_ws_port}}"
+			local ws_listen_port="${explicit_ws_port:-8546}"
+			cat >> "${compose_file}" <<EOF
+      - "${ws_host_port}:${ws_listen_port}"
+EOF
+		fi
+		cat >> "${compose_file}" <<EOF
       - "${el_eth_port}:30303"
       - "${el_eth_port}:30303/udp"
       - "${el_prometheus_port}:9001"
@@ -9873,10 +9961,17 @@ ${reth_full_line}      - --datadir=/root/.bera-reth
       - --http.port=8545
       - --http.corsdomain=*
       - --port=30303
-      - --ws
-      - --ws.addr=0.0.0.0
-      - --ws.port=8546
-      - --ws.origins=*
+EOF
+		if [[ "${enable_ws}" == "true" ]]; then
+			local ws_flag
+			while IFS= read -r ws_flag; do
+				[[ -z "${ws_flag}" ]] && continue
+				cat >> "${compose_file}" <<EOF
+      - ${ws_flag}
+EOF
+			done <<< "$(format_reth_ws_flags true "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}" 8546)"
+		fi
+		cat >> "${compose_file}" <<EOF
     healthcheck:
       test: ["CMD-SHELL", "curl -sf -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://localhost:8545 || exit 1"]
       interval: 10s
@@ -9982,6 +10077,12 @@ cmd_start() {
 
 	local beranodes_dir="${BERANODES_PATH_DEFAULT}"
 	local external_ip=""
+	local explicit_bootnodes=""
+	local explicit_trusted_peers=""
+	local enable_ws="false"
+	local explicit_ws_addr=""
+	local explicit_ws_port=""
+	local explicit_ws_origins=""
 
 	while [[ $# -gt 0 ]]; do
 		case $1 in
@@ -9998,6 +10099,55 @@ cmd_start() {
 				return 1
 			fi
 			;;
+		--bootnodes)
+			if [[ -n "${2:-}" ]]; then
+				explicit_bootnodes="$2"
+				shift 2
+			else
+				log_error "--bootnodes requires a comma-separated enode list"
+				return 1
+			fi
+			;;
+		--trusted-peers)
+			if [[ -n "${2:-}" ]]; then
+				explicit_trusted_peers="$2"
+				shift 2
+			else
+				log_error "--trusted-peers requires a comma-separated enode list"
+				return 1
+			fi
+			;;
+		--ws.addr)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_addr="$2"
+				shift 2
+			else
+				log_error "--ws.addr requires a bind address"
+				return 1
+			fi
+			;;
+		--ws.port)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_port="$2"
+				shift 2
+			else
+				log_error "--ws.port requires a port"
+				return 1
+			fi
+			;;
+		--ws.origin | --ws.origins)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_origins="$2"
+				shift 2
+			else
+				log_error "--ws.origin requires an origin list"
+				return 1
+			fi
+			;;
+		--ws)
+			enable_ws="true"
+			shift
+			;;
 		--help | -h)
 			show_start_help
 			return 0
@@ -10007,6 +10157,11 @@ cmd_start() {
 			;;
 		esac
 	done
+
+	if [[ "${enable_ws}" != "true" ]] && [[ -n "${explicit_ws_addr}" || -n "${explicit_ws_port}" || -n "${explicit_ws_origins}" ]]; then
+		log_error "--ws.addr, --ws.port, and --ws.origin require --ws"
+		return 1
+	fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 2] Configuration File Validation
@@ -11083,7 +11238,7 @@ EOF
 				log_info "Starting nodes with docker-compose..."
 				
 				# Generate docker-compose.yml
-				generate_docker_compose "${beranodes_dir}" "${config_json_path}" "${docker_beacond_tag}" "${docker_berareth_tag}"
+				generate_docker_compose "${beranodes_dir}" "${config_json_path}" "${docker_beacond_tag}" "${docker_berareth_tag}" "${explicit_bootnodes}" "${explicit_trusted_peers}" "${enable_ws}" "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}"
 				
 				# Change to the beranodes directory for docker-compose context
 				local compose_file="${beranodes_dir}/tmp/docker-compose.yml"
@@ -11198,14 +11353,16 @@ EOF
 						else
 							nat_arg=""
 						fi
-						local seed_dir="${beranode_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${network}")"
-						ensure_el_enode_files "${network}" "${seed_dir}" || true
-						local official_bootnodes official_peers
-						official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
-						official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
-						configtoml_berareth_bootnodes="$(merge_enodes "${configtoml_berareth_bootnodes}" "${official_bootnodes}")"
-						configtoml_berareth_trusted_peers="$(merge_enodes "${configtoml_berareth_trusted_peers}" "${official_peers}")"
 					fi
+					configtoml_berareth_bootnodes="$(resolve_reth_enodes "${network}" "${configtoml_berareth_bootnodes}" "${explicit_bootnodes}")"
+					configtoml_berareth_trusted_peers="$(resolve_reth_enodes "${network}" "${configtoml_berareth_trusted_peers}" "${explicit_trusted_peers}")"
+
+					local reth_ws_flags=()
+					local reth_ws_flag
+					while IFS= read -r reth_ws_flag; do
+						[[ -z "${reth_ws_flag}" ]] && continue
+						reth_ws_flags+=("${reth_ws_flag}")
+					done <<< "$(format_reth_ws_flags "${enable_ws}" "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}" "${el_ws_port}")"
 					
 					${bin_bera_reth} node \
 						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
@@ -11226,10 +11383,7 @@ EOF
 						--http.port="${el_ethrpc_port}" \
 						--http.corsdomain="*" \
 						--port="${el_eth_port}" \
-						--ws \
-						--ws.addr=0.0.0.0 \
-						--ws.port="${el_ws_port}" \
-						--ws.origins="*" \
+						${reth_ws_flags[@]+"${reth_ws_flags[@]}"} \
 						&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
 					local pid=$!
 					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
@@ -11742,10 +11896,10 @@ format_block_age() {
 
 	# macOS and GNU date handle -d / -jf differently
 	if [[ "${IS_MACOS}" == "true" ]]; then
-		# Trim fractional seconds + Z for macOS date parsing
+		# Trim fractional seconds + Z; parse as UTC (CometBFT times are Zulu)
 		local trimmed
 		trimmed=$(echo "${ts}" | sed 's/\.[0-9]*Z$/Z/' | sed 's/Z$//')
-		block_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "${trimmed}" +%s 2>/dev/null) || { echo "--"; return; }
+		block_epoch=$(date -u -jf "%Y-%m-%dT%H:%M:%S" "${trimmed}" +%s 2>/dev/null) || { echo "--"; return; }
 	else
 		block_epoch=$(date -d "${ts}" +%s 2>/dev/null) || { echo "--"; return; }
 	fi

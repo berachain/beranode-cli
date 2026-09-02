@@ -121,8 +121,9 @@ validate_jwt() {
 # Returns: 0 if valid, 1 if invalid
 validate_path() {
 	local value="$1"
-	# Path must be non-empty and not contain null bytes
-	[[ -n "$value" && ! "$value" =~ $'\0' ]]
+	# Bash strings cannot contain NUL. Do not use =~ $'\0': GNU bash treats
+	# that as an empty regex, which matches every string, so every path fails.
+	[[ -n "$value" ]]
 }
 
 # Validates a URL (http, https, tcp, ws, wss)

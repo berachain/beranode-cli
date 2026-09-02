@@ -87,6 +87,19 @@ assert_failure 'validate_hex_string 0x123 64' "Too short private key"
 assert_failure 'validate_hex_string 1234567890123456789012345678901234567890123456789012345678901234 64' "Missing 0x prefix"
 assert_failure 'validate_hex_string 0x123456789012345678901234567890123456789012345678901234567890123Z 64' "Non-hex character"
 
+test_suite "Path Validation"
+
+# Valid paths (must not use =~ $'\0'; GNU bash treats that as an empty regex)
+assert_success 'validate_path /data/berachain/beranode-cli/beranodes' "Linux absolute path is valid"
+assert_success 'validate_path /tmp/beranodes' "tmp absolute path is valid"
+assert_success 'validate_path ./beranodes' "Relative path is valid"
+assert_success 'validate_path beranodes' "Simple relative path is valid"
+assert_success 'validate_config_field beranode_dir /data/berachain/beranode-cli/beranodes' "beranode_dir Linux path field is valid"
+
+# Invalid paths
+assert_failure 'validate_path ""' "Empty path is invalid"
+assert_failure 'validate_config_field beranode_dir ""' "Empty beranode_dir field is invalid"
+
 test_suite "URL Validation"
 
 # Valid URLs

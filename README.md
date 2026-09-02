@@ -81,6 +81,12 @@ Start a Berachain node that has been initialized. Network is read from `beranode
 **Options:**
 - `--beranodes-dir <path>` - Beranodes data directory (default: `./beranodes`)
 - `--external-ip <ip>` - Public IP advertised to peers (bepolia/mainnet)
+- `--bootnodes <enodes>` - Comma-separated EL bootnodes. On bepolia/mainnet, `--bootnodes` is omitted unless this is set (reth's `--chain` preset handles discovery)
+- `--trusted-peers <enodes>` - Comma-separated EL trusted peers. On bepolia/mainnet, `--trusted-peers` is omitted unless this is set
+- `--ws` - Enable the EL websocket RPC. Without this, `--ws`, `--ws.addr`, `--ws.port`, and `--ws.origins` are omitted
+- `--ws.addr <addr>` - Websocket bind address (requires `--ws`; default: `0.0.0.0`)
+- `--ws.port <port>` - Websocket port (requires `--ws`; default: `8546` / node `el_ws_port`)
+- `--ws.origin <origins>` - Websocket allowed origins (requires `--ws`; default: `*`). Alias: `--ws.origins`
 
 **Example:**
 ```bash
@@ -443,7 +449,7 @@ Do not rewrite every `vX.Y.Z` string in the tree. Runtime version output always 
 
 | Network | beacond | bera-reth |
 | --- | --- | --- |
-| bepolia | `v1.4.2-rc.0` | `v1.4.4` |
+| bepolia | `v1.4.1` | `v1.4.4` |
 | mainnet | `v1.4.1` | `v1.4.4` |
 | devnet | GitHub `latest` | GitHub `latest` |
 

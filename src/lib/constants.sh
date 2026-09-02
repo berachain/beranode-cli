@@ -189,7 +189,7 @@ readonly LIVE_EL_REFRESH_SECONDS=10
 readonly SEED_DATA_BASE_URL="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks"
 
 # Recommended client versions per public network (docs; will drift — override with flags).
-readonly RECOMMENDED_BEACOND_VERSION_BEPOLIA="v1.4.2-rc.0"
+readonly RECOMMENDED_BEACOND_VERSION_BEPOLIA="v1.4.1"
 readonly RECOMMENDED_BERARETH_VERSION_BEPOLIA="v1.4.4"
 readonly RECOMMENDED_BEACOND_VERSION_MAINNET="v1.4.1"
 readonly RECOMMENDED_BERARETH_VERSION_MAINNET="v1.4.4"

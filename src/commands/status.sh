@@ -288,10 +288,10 @@ format_block_age() {
 
 	# macOS and GNU date handle -d / -jf differently
 	if [[ "${IS_MACOS}" == "true" ]]; then
-		# Trim fractional seconds + Z for macOS date parsing
+		# Trim fractional seconds + Z; parse as UTC (CometBFT times are Zulu)
 		local trimmed
 		trimmed=$(echo "${ts}" | sed 's/\.[0-9]*Z$/Z/' | sed 's/Z$//')
-		block_epoch=$(date -jf "%Y-%m-%dT%H:%M:%S" "${trimmed}" +%s 2>/dev/null) || { echo "--"; return; }
+		block_epoch=$(date -u -jf "%Y-%m-%dT%H:%M:%S" "${trimmed}" +%s 2>/dev/null) || { echo "--"; return; }
 	else
 		block_epoch=$(date -d "${ts}" +%s 2>/dev/null) || { echo "--"; return; }
 	fi
