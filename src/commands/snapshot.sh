@@ -171,6 +171,15 @@ cmd_snapshot() {
 
 snapshot_nodes_appear_running() {
 	local beranodes_dir="$1"
+	local config="${beranodes_dir}/beranodes.config.json"
+	local mode="local"
+	if [[ -f "$config" ]]; then
+		mode=$(jq -r '.mode // "local"' "$config" 2>/dev/null) || mode="local"
+	fi
+	if [[ "$mode" == "serviceman" ]]; then
+		serviceman_any_running "$beranodes_dir"
+		return $?
+	fi
 	local runs="${beranodes_dir}${BERANODES_PATH_RUNS}"
 	if [[ ! -d "$runs" ]]; then
 		return 1

@@ -54,6 +54,9 @@ Initialize a new Berachain node with specified configuration.
 - `--beacond-version <tag>` - BeaconKit release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
 - `--berareth-version <tag>` - bera-reth release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
 - `--force` - Force initialization (overwrite existing configuration)
+- `--mode <local|docker|serviceman>` - Process runtime (default: `local`)
+- `--docker` - Docker mode (alias for `--mode docker`)
+- `--serviceman` - Serviceman mode (alias for `--mode serviceman`). macOS launchd only
 - `--wallet-private-key <key>` - Private key for the wallet
 - `--wallet-address <address>` - Wallet address
 - `--wallet-balance <amount>` - Initial wallet balance (default: 1000000000000000000000000000)
@@ -66,6 +69,9 @@ Initialize a new Berachain node with specified configuration.
 # Initialize a Bepolia testnet node (official genesis + snapshots)
 ./beranode init --network bepolia --validators 1
 
+# Initialize under launchd on macOS (start/stop manage the service)
+./beranode init --network bepolia --pruned-nodes 1 --mode serviceman
+
 # Initialize multiple nodes with custom moniker
 ./beranode init --moniker mynode --validators 2 --full-nodes 1
 ```
@@ -76,7 +82,7 @@ Initialize a new Berachain node with specified configuration.
 ./beranode start [options]
 ```
 
-Start a Berachain node that has been initialized. Network is read from `beranodes.config.json`.
+Start a Berachain node that has been initialized. Network is read from `beranodes.config.json`. In `serviceman` mode this loads launchd jobs instead of backgrounding PIDs.
 
 **Options:**
 - `--beranodes-dir <path>` - Beranodes data directory (default: `./beranodes`)
@@ -87,10 +93,46 @@ Start a Berachain node that has been initialized. Network is read from `beranode
 - `--ws.addr <addr>` - Websocket bind address (requires `--ws`; default: `0.0.0.0`)
 - `--ws.port <port>` - Websocket port (requires `--ws`; default: `8546` / node `el_ws_port`)
 - `--ws.origin <origins>` - Websocket allowed origins (requires `--ws`; default: `*`). Alias: `--ws.origins`
+- `--logs-reset` - Remove existing files in `beranodes/logs` without prompting (same as answering `y` to the log-reset prompt)
 
 **Example:**
 ```bash
 ./beranode start
+```
+
+#### Stop a Node
+
+```bash
+./beranode stop [options]
+```
+
+Stop nodes from `beranodes.config.json`. Local mode kills PID files; Docker uses compose down; serviceman unloads launchd jobs.
+
+**Example:**
+```bash
+./beranode stop
+```
+
+#### Check Status
+
+```bash
+./beranode status [options]
+```
+
+Display live node status (EL/CL block height, peers, sync) plus host storage: total volume capacity, space used on the device, and the size of `beranodes/nodes`.
+
+**Options:**
+- `--verbose|-v` - One row per service (`beacond`, `bera-reth`)
+- `--watch|-w` - Live-refresh mode
+- `--interval|-i <seconds>` - Watch refresh interval (default: `2`)
+- `--json` - Machine-readable JSON (incompatible with `--watch`)
+- `--beranodes-dir <path>` - Beranodes data directory (default: `./beranodes`)
+
+**Example:**
+```bash
+./beranode status
+./beranode status --watch
+./beranode status --json
 ```
 
 #### Snapshots (bepolia / mainnet)
@@ -208,7 +250,8 @@ beranodes/
 ├── bin/          # Binary files (beacond, bera-reth)
 ├── tmp/          # Temporary files
 ├── logs/         # Log files (e.g., silent-smile-forest-0-val-beacond.log)
-├── runs/         # PID files for running nodes
+├── runs/         # PID files for running nodes (local mode)
+├── services/     # launchd plists + launchd.json (serviceman mode)
 └── nodes/        # Node configurations
     ├── 0-validator       # Validator node 0
     ├── 1-validator       # Validator node 1
@@ -227,6 +270,22 @@ beranodes/
 # Start the node
 ./beranode start
 ```
+
+### Serviceman mode (macOS launchd)
+
+`serviceman` is local-mode binaries supervised by launchd. Init still downloads native `beacond` / `bera-reth`; the difference is start/stop/logs.
+
+```bash
+./beranode init --network bepolia --pruned-nodes 1 --serviceman
+./beranode start
+./beranode stop
+```
+
+- Requires macOS and `launchctl`. Linux systemd is not implemented yet; init fails instead of falling back to local.
+- Jobs are user LaunchAgents (`~/Library/LaunchAgents/com.berachain.beranode.<hash>.<moniker>.<index>.<component>.plist`), not system daemons (no root).
+- `KeepAlive` restarts a crashed process. `beranode stop` unloads the jobs and removes those LaunchAgents so they do not come back at login. Plist copies remain in `beranodes/services/` for inspection.
+- Stdout and stderr go to the same files as local mode under `beranodes/logs/`.
+- Do not combine `--docker` and `--serviceman`.
 
 ### Multi-Node Setup
 
@@ -432,7 +491,7 @@ Do not edit historical `## [X.Y.Z]` sections. When releasing, promote `[Unreleas
 
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current CLI version is **0.9.0**. The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary. `beranode version` / `--version` / `-v` print `beranode v${BERANODE_VERSION}`.
+This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current CLI version is **0.11.0**. The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary. `beranode version` / `--version` / `-v` print `beranode v${BERANODE_VERSION}`.
 
 Version numbers use `MAJOR.MINOR.PATCH`, with optional prereleases:
 

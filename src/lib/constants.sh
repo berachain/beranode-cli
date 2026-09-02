@@ -72,7 +72,7 @@ set -euo pipefail
 # Management: Edit this value when releasing, then run ./build.sh
 #
 # Example: "0.9.0"
-BERANODE_VERSION="0.10.0"
+BERANODE_VERSION="0.11.0"
 
 # =============================================================================
 # [2] PLATFORM DETECTION
@@ -184,6 +184,10 @@ readonly PUBLIC_EL_RPC_MAINNET="https://rpc.berachain.com"
 # How often `beranode status` re-reads network from beranodes.config.json
 # and queries the public EL RPC for LIVE EL BLOCK.
 readonly LIVE_EL_REFRESH_SECONDS=10
+
+# How often `beranode status --watch` re-runs diskutil/df and `du` for the
+# Storage footer (directory walk can be slow on large chaindata).
+readonly STORAGE_REFRESH_SECONDS=30
 
 # Official seed-data (genesis, KZG, EL bootnodes/peers, toml overlays).
 readonly SEED_DATA_BASE_URL="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks"
@@ -420,6 +424,20 @@ readonly BERANODES_PATH_RUNS="/runs"
 # Value: "/snapshots"
 # Contents: .tar.lz4 archives plus unzipped beacond/ and reth/ trees
 readonly BERANODES_PATH_SNAPSHOTS="/snapshots"
+
+# Variable: BERANODES_PATH_SERVICES
+# Description: OS service-manager artifacts (launchd plists, manifest)
+# Value: "/services"
+# Contents: Copied LaunchAgent plists and launchd.json manifest
+readonly BERANODES_PATH_SERVICES="/services"
+
+# Variable: SERVICEMAN_LAUNCHD_LABEL_PREFIX
+# Description: Reverse-DNS prefix for launchd job labels
+readonly SERVICEMAN_LAUNCHD_LABEL_PREFIX="com.berachain.beranode"
+
+# Variable: SERVICEMAN_LAUNCHD_THROTTLE_INTERVAL
+# Description: Seconds launchd waits before restarting a crashed job
+readonly SERVICEMAN_LAUNCHD_THROTTLE_INTERVAL=10
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File Names

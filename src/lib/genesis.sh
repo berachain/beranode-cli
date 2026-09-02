@@ -1185,7 +1185,10 @@ generate_base_beacond_config() {
 			;;
 		--mode)
 			check_mode="$2"
-			if [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
+			if [[ "$check_mode" == "serviceman" ]]; then
+				# Same native binaries as local; process manager is applied at start.
+				mode="local"
+			elif [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
 				mode="$check_mode"
 			else
 				log_error "Unknown mode: ${check_mode}"
@@ -1560,7 +1563,10 @@ generate_beacond_genesis_file_and_premined_deposits_storage() {
 			;;
 		--mode)
 			check_mode="$2"
-			if [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
+			if [[ "$check_mode" == "serviceman" ]]; then
+				# Same native binaries as local; process manager is applied at start.
+				mode="local"
+			elif [[ "$check_mode" == "local" || "$check_mode" == "docker" ]]; then
 				mode="$check_mode"
 			else
 				log_error "Unknown mode: ${check_mode}"

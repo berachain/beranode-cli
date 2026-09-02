@@ -46,6 +46,10 @@ Usage: beranode start [OPTIONS]
 
 Start Berachain nodes based on the configuration file.
 
+In docker mode, uses docker compose. In local mode, starts binaries in the
+background and records PIDs. In serviceman mode, installs and starts launchd
+jobs (macOS user LaunchAgents); logs go to beranodes/logs/.
+
 Options:
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
@@ -62,12 +66,15 @@ Options:
                             or the node's el_ws_port)
   --ws.origin <origins>     Websocket allowed origins (requires --ws;
                             default: *). Alias: --ws.origins
+  --logs-reset              Remove existing files in beranodes/logs without
+                            prompting (answers y to the log-reset prompt)
   --help|-h                 Display this help message
 
 Examples:
   beranode start
   beranode start --beranodes-dir /custom/path
   beranode start --ws
+  beranode start --logs-reset
   beranode start --help
 
 EOF
@@ -111,6 +118,35 @@ print_node_ports() {
 	print_port_section "$node_json" "beacon-kit" \
 		cl_prometheus_port beacond_node_port \
 		configtoml_grpc_laddr configtoml_grpc_privileged_laddr
+}
+
+# Starts a native process either in the background (local) or via launchd (serviceman).
+# $1 mode  $2 beranodes_dir  $3 base_moniker  $4 node_index  $5 component
+# $6 working_dir  $7 log_file  $8 pid_file  $9... argv
+_start_native_process() {
+	local mode="$1"
+	local beranodes_dir="$2"
+	local base_moniker="$3"
+	local node_index="$4"
+	local component="$5"
+	local working_dir="$6"
+	local log_file="$7"
+	local pid_file="$8"
+	shift 8
+
+	if [[ "${mode}" == "serviceman" ]]; then
+		serviceman_start_service \
+			"${beranodes_dir}" \
+			"${base_moniker}" \
+			"${node_index}" \
+			"${component}" \
+			"${working_dir}" \
+			"${log_file}" \
+			"$@" || return 1
+	else
+		"$@" &>"${log_file}" &
+		echo "$!" >"${pid_file}"
+	fi
 }
 
 # =============================================================================
@@ -280,6 +316,11 @@ EOF
       - --trusted-peers=${berareth_trusted_peers}
 EOF
 		fi
+		if ! is_public_network "${compose_network}"; then
+			cat >> "${compose_file}" <<EOF
+      - --disable-dns-discovery
+EOF
+		fi
 
 		local reth_full_line=""
 		if is_public_network "${compose_network}" && reth_uses_pruning "${role}" "${snapshot_override}"; then
@@ -412,6 +453,7 @@ cmd_start() {
 	# -------------------------------------------------------------------------
 	# Parse and validate command-line options. Supports:
 	# - --beranodes-dir: Custom directory for node data
+	# - --logs-reset: Remove existing log files without prompting
 	# - --help/-h: Display help information
 	# -------------------------------------------------------------------------
 
@@ -423,6 +465,7 @@ cmd_start() {
 	local explicit_ws_addr=""
 	local explicit_ws_port=""
 	local explicit_ws_origins=""
+	local logs_reset="false"
 
 	while [[ $# -gt 0 ]]; do
 		case $1 in
@@ -486,6 +529,10 @@ cmd_start() {
 			;;
 		--ws)
 			enable_ws="true"
+			shift
+			;;
+		--logs-reset)
+			logs_reset="true"
 			shift
 			;;
 		--help | -h)
@@ -572,6 +619,10 @@ cmd_start() {
 	local force=$(get_config "force")
 	local mode=$(get_config "mode")
 
+	if [[ "${mode}" == "serviceman" ]]; then
+		serviceman_prepare_start "${beranode_dir}" || return 1
+	fi
+
 	# Wallet configuration
 	local wallet_private_key=$(get_config "wallet_private_key")
 	local wallet_address=$(get_config "wallet_address")
@@ -632,7 +683,7 @@ cmd_start() {
 			log_error "docker-beacond:${docker_beacond_tag} image not found"
 			return 1
 		fi
-	elif [[ "${mode}" == "local" ]]; then
+	elif [[ "${mode}" == "local" || "${mode}" == "serviceman" ]]; then
 		# Verify local binaries exist and can execute natively
 		if [[ ! -x "${bin_beacond}" ]]; then
 			log_error "beacond binary not found or not executable at: ${bin_beacond}"
@@ -684,10 +735,10 @@ cmd_start() {
 		# - Suitable for rapid iteration and testing
 		# ---------------------------------------------------------------------
 
-		if [[ "${mode}" == "local" ]] || [[ "${mode}" == "docker" ]]; then
+		if [[ "${mode}" == "local" ]] || [[ "${mode}" == "docker" ]] || [[ "${mode}" == "serviceman" ]]; then
 			log_info "Starting Beranode in ${mode} mode"
 
-			if [[ "${mode}" == "local" ]]; then
+			if [[ "${mode}" == "local" || "${mode}" == "serviceman" ]]; then
 				# Check if bin/beacond exists in ${config_dir}/bin and is executable
 				local beacond_binary="${beranodes_dir}/bin/beacond"
 				if [[ ! -x "${beacond_binary}" ]]; then
@@ -706,13 +757,18 @@ cmd_start() {
 			# Check if logs directory has existing files and prompt user
 			local logs_dir="${beranode_dir}${BERANODES_PATH_LOGS}"
 			if [ -d "${logs_dir}" ] && [ "$(ls -A "${logs_dir}")" ]; then
-				log_warn "Existing log files found in ${logs_dir}"
-				read -p "Do you want to remove existing log files? (y/n) " remove_logs
-				if [ "${remove_logs}" == "y" ]; then
+				if [[ "${logs_reset}" == "true" ]]; then
 					rm -f "${logs_dir}"/*
-					log_info "Existing log files removed"
+					log_info "Existing log files removed (--logs-reset)"
 				else
-					log_info "Keeping existing log files"
+					log_warn "Existing log files found in ${logs_dir}"
+					read -p "Do you want to remove existing log files? (y/n) " remove_logs
+					if [ "${remove_logs}" == "y" ]; then
+						rm -f "${logs_dir}"/*
+						log_info "Existing log files removed"
+					else
+						log_info "Keeping existing log files"
+					fi
 				fi
 			fi
 
@@ -1630,9 +1686,19 @@ EOF
 					if [[ "${role}" == "validator" ]]; then
 						role_short="val"
 					fi
-					
-					${bin_beacond} start --home "${beacond_dir}" &>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log" &
-					echo "$!" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+
+					local beacond_log="${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-beacond.log"
+					local beacond_pid="${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-beacond.pid"
+					_start_native_process \
+						"${mode}" \
+						"${beranode_dir}" \
+						"${base_moniker}" \
+						"${node_index}" \
+						"beacond" \
+						"${beacond_dir}" \
+						"${beacond_log}" \
+						"${beacond_pid}" \
+						"${bin_beacond}" start --home "${beacond_dir}"
 					log_success "✔ Beacond node started"
 
 					# bera-reth
@@ -1648,30 +1714,17 @@ EOF
 					configtoml_berareth_trusted_peers=""
 					if [[ ${#berareth_bootnodes[@]} -gt 1 ]]; then
 						read -a bootnodes < <(array_exclude_element berareth_bootnodes[@] "${berareth_bootnodes[$node_index]}")
-						read -a trusted_peers < <(array_exclude_element berareth_trusted_peers[@] "${berareth_trusted_peers[$node_index]}")
 						read -a el_eth_ports < <(array_exclude_element berareth_el_eth_port[@] "${berareth_el_eth_port[$node_index]}")
 
-						# Local mode: use localhost and config ports
-						configtoml_berareth_bootnodes="$(
-							out=()
-							for i in "${!bootnodes[@]}"; do
-								out+=("enode://${bootnodes[$i]}@localhost:${el_eth_ports[$i]}")
-							done
-							(
-								IFS=,
-								echo "${out[*]}"
-							)
-						)"
-						configtoml_berareth_trusted_peers="$(
-							out=()
-							for i in "${!trusted_peers[@]}"; do
-								out+=("enode://${trusted_peers[$i]}@localhost:${el_eth_ports[$i]}")
-							done
-							(
-								IFS=,
-								echo "${out[*]}"
-							)
-						)"
+						# Local/serviceman: IPv4 loopback. `localhost` can resolve to ::1,
+						# which reth cannot dial (discv4 records and trusted peers need an IP).
+						local enode_pairs=()
+						local ei
+						for ei in "${!bootnodes[@]}"; do
+							enode_pairs+=("${bootnodes[$ei]}" "${el_eth_ports[$ei]}")
+						done
+						configtoml_berareth_bootnodes="$(format_reth_enodes_at_host "127.0.0.1" "${enode_pairs[@]}")"
+						configtoml_berareth_trusted_peers="${configtoml_berareth_bootnodes}"
 					fi
 
 					private_key=$(echo "${node_json}" | jq -r '.berareth_config.private_key')
@@ -1704,32 +1757,56 @@ EOF
 						reth_ws_flags+=("${reth_ws_flag}")
 					done <<< "$(format_reth_ws_flags "${enable_ws}" "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}" "${el_ws_port}")"
 					
-					${bin_bera_reth} node \
-						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
-						$([[ -z "${configtoml_berareth_trusted_peers}" ]] || echo --trusted-peers="${configtoml_berareth_trusted_peers}") \
-						$([[ -z "${reth_full_arg}" ]] || echo "${reth_full_arg}") \
-						--authrpc.addr="127.0.0.1" \
-						--authrpc.port="${el_authrpc_port}" \
-						--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex" \
-						"${reth_chain_arg}" \
-						--datadir="${bera_reth_dir}" \
-						--discovery.port="${el_eth_port}" \
-						--engine.persistence-threshold=0 \
-						--engine.memory-block-buffer-target=0 \
-						--http \
-						$([[ -z "${nat_arg}" ]] || echo "${nat_arg}") \
-						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev" \
-						--http.addr=0.0.0.0 \
-						--http.port="${el_ethrpc_port}" \
-						--http.corsdomain="*" \
-						--port="${el_eth_port}" \
-						${reth_ws_flags[@]+"${reth_ws_flags[@]}"} \
-						&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
-					local pid=$!
-					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+					local reth_cmd=("${bin_bera_reth}" node)
+					[[ -n "${configtoml_berareth_bootnodes}" ]] && reth_cmd+=(--bootnodes="${configtoml_berareth_bootnodes}")
+					[[ -n "${configtoml_berareth_trusted_peers}" ]] && reth_cmd+=(--trusted-peers="${configtoml_berareth_trusted_peers}")
+					if ! is_public_network "${network}"; then
+						reth_cmd+=(--disable-dns-discovery)
+					fi
+					[[ -n "${reth_full_arg}" ]] && reth_cmd+=("${reth_full_arg}")
+					reth_cmd+=(
+						--authrpc.addr="127.0.0.1"
+						--authrpc.port="${el_authrpc_port}"
+						--authrpc.jwtsecret="${beacond_dir}/config/jwt.hex"
+						"${reth_chain_arg}"
+						--datadir="${bera_reth_dir}"
+						--discovery.port="${el_eth_port}"
+						--engine.persistence-threshold=0
+						--engine.memory-block-buffer-target=0
+						--http
+					)
+					[[ -n "${nat_arg}" ]] && reth_cmd+=("${nat_arg}")
+					reth_cmd+=(
+						--http.api="admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev"
+						--http.addr=0.0.0.0
+						--http.port="${el_ethrpc_port}"
+						--http.corsdomain="*"
+						--port="${el_eth_port}"
+					)
+					if [[ ${#reth_ws_flags[@]} -gt 0 ]]; then
+						reth_cmd+=("${reth_ws_flags[@]}")
+					fi
+
+					local reth_log="${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log"
+					local reth_pid="${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
+					_start_native_process \
+						"${mode}" \
+						"${beranode_dir}" \
+						"${base_moniker}" \
+						"${node_index}" \
+						"bera-reth" \
+						"${bera_reth_dir}" \
+						"${reth_log}" \
+						"${reth_pid}" \
+						"${reth_cmd[@]}"
 					log_success "✔ Bera-reth node started"
 					print_node_ports "${node_json}"
 				done
+				if [[ "${mode}" == "serviceman" ]]; then
+					log_info "Logs: ${beranode_dir}${BERANODES_PATH_LOGS}/"
+					log_info "Plists: ${HOME}/Library/LaunchAgents/${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.*.plist"
+					log_info "Stop with: beranode stop"
+				fi
 			fi
 		else
 			# Unsupported mode (e.g., "distributed", "cloud")

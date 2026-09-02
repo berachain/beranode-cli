@@ -268,6 +268,33 @@ resolve_reth_enodes() {
 	fi
 }
 
+# Comma-separated enode://pubkey@host:port entries for a cluster mesh.
+# Remaining args are pubkey/port pairs. Host must be an IPv4 address for
+# local/serviceman (reth discv4 NodeRecord and trusted-peer dials reject
+# `localhost`, which can resolve to ::1 on macOS).
+format_reth_enodes_at_host() {
+	local host="${1:-}"
+	shift || true
+	local out=() pubkey port
+	if [[ -z "${host}" ]]; then
+		echo ""
+		return 0
+	fi
+	while [[ $# -ge 2 ]]; do
+		pubkey="$1"
+		port="$2"
+		shift 2
+		[[ -z "${pubkey}" || -z "${port}" ]] && continue
+		out+=("enode://${pubkey}@${host}:${port}")
+	done
+	if [[ ${#out[@]} -eq 0 ]]; then
+		echo ""
+		return 0
+	fi
+	local IFS=,
+	echo "${out[*]}"
+}
+
 # Newline-separated bera-reth websocket flags. Empty when --ws is not enabled.
 # Defaults when enabled: --ws.addr=0.0.0.0, --ws.port=<default_port>, --ws.origins=*
 format_reth_ws_flags() {
