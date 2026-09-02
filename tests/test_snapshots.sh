@@ -58,7 +58,7 @@ assert_equals "${SEED_DATA_BASE_URL}/80069" "$(network_seed_data_url bepolia)" \
 assert_equals "${SEED_DATA_BASE_URL}/80094" "$(network_seed_data_url mainnet)" \
 	"mainnet seed-data URL"
 
-assert_equals "v1.4.2-rc.0" "$(network_recommended_beacond_version bepolia)" \
+assert_equals "v1.4.1" "$(network_recommended_beacond_version bepolia)" \
 	"bepolia recommended beacond version"
 assert_equals "v1.4.4" "$(network_recommended_berareth_version bepolia)" \
 	"bepolia recommended bera-reth version"
@@ -331,7 +331,43 @@ assert_equals "enode://aaa@1.1.1.1:30303" \
 	"merge_enodes skips empty local list"
 assert_empty "$(merge_enodes "" "")" \
 	"merge_enodes of empties is empty"
+
+assert_empty "$(resolve_reth_enodes bepolia "enode://local@127.0.0.1:30303" "")" \
+	"public network omits auto bootnodes without an explicit override"
+assert_empty "$(resolve_reth_enodes mainnet "enode://local@127.0.0.1:30303" "")" \
+	"mainnet omits auto bootnodes without an explicit override"
+assert_equals "enode://explicit@9.9.9.9:30303" \
+	"$(resolve_reth_enodes bepolia "enode://local@127.0.0.1:30303" "enode://explicit@9.9.9.9:30303")" \
+	"public network uses only the explicit override"
+assert_equals "enode://local@127.0.0.1:30303" \
+	"$(resolve_reth_enodes devnet "enode://local@127.0.0.1:30303" "")" \
+	"devnet keeps local cluster enodes"
+assert_equals "enode://local@127.0.0.1:30303,enode://explicit@9.9.9.9:30303" \
+	"$(resolve_reth_enodes devnet "enode://local@127.0.0.1:30303" "enode://explicit@9.9.9.9:30303")" \
+	"devnet merges local cluster with explicit override"
 rm -rf "$ENODE_DIR"
+
+test_suite "EL websocket flags"
+
+assert_empty "$(format_reth_ws_flags false "" "" "")" \
+	"omits --ws flags when --ws is not set"
+assert_empty "$(format_reth_ws_flags "" "" "" "")" \
+	"omits --ws flags when enabled is empty"
+assert_equals "$(printf '%s\n' --ws --ws.addr=0.0.0.0 --ws.port=8546 '--ws.origins=*')" \
+	"$(format_reth_ws_flags true "" "" "")" \
+	"--ws alone uses default addr, port, and origins"
+assert_equals "$(printf '%s\n' --ws --ws.addr=127.0.0.1 --ws.port=8546 '--ws.origins=*')" \
+	"$(format_reth_ws_flags true "127.0.0.1" "" "")" \
+	"--ws.addr overrides the default bind address"
+assert_equals "$(printf '%s\n' --ws --ws.addr=0.0.0.0 --ws.port=9999 '--ws.origins=*')" \
+	"$(format_reth_ws_flags true "" "9999" "")" \
+	"--ws.port overrides the default port"
+assert_equals "$(printf '%s\n' --ws --ws.addr=0.0.0.0 --ws.port=8546 '--ws.origins=https://app.example')" \
+	"$(format_reth_ws_flags true "" "" "https://app.example")" \
+	"--ws.origin overrides the default origins"
+assert_equals "$(printf '%s\n' --ws --ws.addr=0.0.0.0 --ws.port=18546 '--ws.origins=*')" \
+	"$(format_reth_ws_flags true "" "" "" "18546")" \
+	"default port can come from the node's el_ws_port"
 
 test_suite "Version tag regex accepts rc.0"
 

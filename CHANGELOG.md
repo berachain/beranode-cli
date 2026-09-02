@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Summary
+
+Public-network `bera-reth` start is opt-in for bootnodes, trusted peers, and websocket RPC (discovery uses the `--chain` preset). Init no longer mixes RPC nodes with validators on bepolia/mainnet, and bepolia's recommended beacond is `v1.4.1`. Wallet generation and path validation work with current Foundry and GNU bash.
+
+### Added
+
+- `beranode start --bootnodes` and `--trusted-peers` to pass EL enodes when you want them (local and Docker)
+- `beranode start --ws` to enable the EL websocket RPC, with optional `--ws.addr`, `--ws.port`, and `--ws.origin` overrides (local and Docker; Docker maps the WS port only when `--ws` is set)
+
+### Changed
+
+- Public-network `bera-reth` (bepolia/mainnet) no longer includes `--bootnodes` or `--trusted-peers` unless those start flags are set; discovery uses the `--chain` preset instead of official `el-bootnodes.txt` / `el-peers.txt`
+- `bera-reth` no longer includes `--ws`, `--ws.addr`, `--ws.port`, or `--ws.origins` unless `beranode start --ws` is set
+- Recommended beacond for bepolia is `v1.4.1` (was `v1.4.2-rc.0`)
+- `beranode init --network bepolia|mainnet` with `--full-nodes` or `--pruned-nodes` forces `--validators` to 0 so public RPC nodes are not created as validators
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+- `cast wallet new --json` parsing accepts both the current object shape (`.data[0].private_key`) and the legacy array shape (`.[0].private_key`), so EVM wallet generation and bera-reth discovery keys work with newer Foundry
+- `validate_path` no longer uses `=~ $'\0'`, which GNU bash treats as an empty regex and rejected every path (including `beranode_dir`)
+- `beranode status` BLOCK AGE now treats CometBFT timestamps as UTC on macOS, so a synced node no longer shows an age equal to the local timezone offset
+
+### Security
+
 ## [0.10.0] - 2026-08-28
 
 ### Added

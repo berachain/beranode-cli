@@ -50,11 +50,24 @@ Options:
   --beranodes-dir <path>    Specify the beranodes directory path
                             (default: \$PWD/beranodes)
   --external-ip <ip>        Public IP advertised to peers (public networks)
+  --bootnodes <enodes>      Comma-separated EL bootnodes (public networks omit
+                            --bootnodes unless this is set)
+  --trusted-peers <enodes>  Comma-separated EL trusted peers (public networks
+                            omit --trusted-peers unless this is set)
+  --ws                      Enable the EL websocket RPC (--ws, --ws.addr,
+                            --ws.port, --ws.origins). Omitted unless set
+  --ws.addr <addr>          Websocket bind address (requires --ws;
+                            default: 0.0.0.0)
+  --ws.port <port>          Websocket port (requires --ws; default: 8546
+                            or the node's el_ws_port)
+  --ws.origin <origins>     Websocket allowed origins (requires --ws;
+                            default: *). Alias: --ws.origins
   --help|-h                 Display this help message
 
 Examples:
   beranode start
   beranode start --beranodes-dir /custom/path
+  beranode start --ws
   beranode start --help
 
 EOF
@@ -114,6 +127,12 @@ print_node_ports() {
 #   $2 - config_json_path: Path to beranodes.config.json
 #   $3 - docker_beacond_tag: Docker image tag for beacond
 #   $4 - docker_berareth_tag: Docker image tag for bera-reth
+#   $5 - explicit_bootnodes: Optional --bootnodes override
+#   $6 - explicit_trusted_peers: Optional --trusted-peers override
+#   $7 - enable_ws: "true" to include --ws and related flags
+#   $8 - explicit_ws_addr: Optional --ws.addr override
+#   $9 - explicit_ws_port: Optional --ws.port override
+#   $10 - explicit_ws_origins: Optional --ws.origin override
 #
 # Output:
 #   Creates docker-compose.yml in beranodes/tmp/
@@ -123,6 +142,12 @@ generate_docker_compose() {
 	local config_json_path="$2"
 	local docker_beacond_tag="$3"
 	local docker_berareth_tag="$4"
+	local explicit_bootnodes="${5:-}"
+	local explicit_trusted_peers="${6:-}"
+	local enable_ws="${7:-false}"
+	local explicit_ws_addr="${8:-}"
+	local explicit_ws_port="${9:-}"
+	local explicit_ws_origins="${10:-}"
 	
 	local compose_file="${beranodes_dir}/tmp/docker-compose.yml"
 	local nodes_count=$(jq -r '.total_nodes' "${config_json_path}")
@@ -132,14 +157,8 @@ generate_docker_compose() {
 	local snapshot_override
 	snapshot_override=$(jq -r '.snapshot_type // empty' "${config_json_path}")
 	local reth_chain_value="/root/.bera-reth/eth-genesis.json"
-	local official_bootnodes=""
-	local official_peers=""
 	if is_public_network "${compose_network}"; then
 		reth_chain_value="$(network_reth_chain "${compose_network}")"
-		local seed_dir="${beranodes_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${compose_network}")"
-		ensure_el_enode_files "${compose_network}" "${seed_dir}" || true
-		official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
-		official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
 	fi
 	
 	log_info "Generating docker-compose.yml for ${nodes_count} node(s)..."
@@ -215,8 +234,8 @@ EOF
 			berareth_bootnodes=$(IFS=,; echo "${bootnode_list[*]}")
 			berareth_trusted_peers="${berareth_bootnodes}"
 		fi
-		berareth_bootnodes="$(merge_enodes "${berareth_bootnodes}" "${official_bootnodes}")"
-		berareth_trusted_peers="$(merge_enodes "${berareth_trusted_peers}" "${official_peers}")"
+		berareth_bootnodes="$(resolve_reth_enodes "${compose_network}" "${berareth_bootnodes}" "${explicit_bootnodes}")"
+		berareth_trusted_peers="$(resolve_reth_enodes "${compose_network}" "${berareth_trusted_peers}" "${explicit_trusted_peers}")"
 		
 		# =================================================================
 		# Generate bera-reth service (execution layer - starts first)
@@ -233,7 +252,15 @@ EOF
       - beranet
     ports:
       - "${el_ethrpc_port}:8545"
-      - "${el_ws_port}:8546"
+EOF
+		if [[ "${enable_ws}" == "true" ]]; then
+			local ws_host_port="${explicit_ws_port:-${el_ws_port}}"
+			local ws_listen_port="${explicit_ws_port:-8546}"
+			cat >> "${compose_file}" <<EOF
+      - "${ws_host_port}:${ws_listen_port}"
+EOF
+		fi
+		cat >> "${compose_file}" <<EOF
       - "${el_eth_port}:30303"
       - "${el_eth_port}:30303/udp"
       - "${el_prometheus_port}:9001"
@@ -274,10 +301,17 @@ ${reth_full_line}      - --datadir=/root/.bera-reth
       - --http.port=8545
       - --http.corsdomain=*
       - --port=30303
-      - --ws
-      - --ws.addr=0.0.0.0
-      - --ws.port=8546
-      - --ws.origins=*
+EOF
+		if [[ "${enable_ws}" == "true" ]]; then
+			local ws_flag
+			while IFS= read -r ws_flag; do
+				[[ -z "${ws_flag}" ]] && continue
+				cat >> "${compose_file}" <<EOF
+      - ${ws_flag}
+EOF
+			done <<< "$(format_reth_ws_flags true "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}" 8546)"
+		fi
+		cat >> "${compose_file}" <<EOF
     healthcheck:
       test: ["CMD-SHELL", "curl -sf -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' http://localhost:8545 || exit 1"]
       interval: 10s
@@ -383,6 +417,12 @@ cmd_start() {
 
 	local beranodes_dir="${BERANODES_PATH_DEFAULT}"
 	local external_ip=""
+	local explicit_bootnodes=""
+	local explicit_trusted_peers=""
+	local enable_ws="false"
+	local explicit_ws_addr=""
+	local explicit_ws_port=""
+	local explicit_ws_origins=""
 
 	while [[ $# -gt 0 ]]; do
 		case $1 in
@@ -399,6 +439,55 @@ cmd_start() {
 				return 1
 			fi
 			;;
+		--bootnodes)
+			if [[ -n "${2:-}" ]]; then
+				explicit_bootnodes="$2"
+				shift 2
+			else
+				log_error "--bootnodes requires a comma-separated enode list"
+				return 1
+			fi
+			;;
+		--trusted-peers)
+			if [[ -n "${2:-}" ]]; then
+				explicit_trusted_peers="$2"
+				shift 2
+			else
+				log_error "--trusted-peers requires a comma-separated enode list"
+				return 1
+			fi
+			;;
+		--ws.addr)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_addr="$2"
+				shift 2
+			else
+				log_error "--ws.addr requires a bind address"
+				return 1
+			fi
+			;;
+		--ws.port)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_port="$2"
+				shift 2
+			else
+				log_error "--ws.port requires a port"
+				return 1
+			fi
+			;;
+		--ws.origin | --ws.origins)
+			if [[ -n "${2:-}" ]]; then
+				explicit_ws_origins="$2"
+				shift 2
+			else
+				log_error "--ws.origin requires an origin list"
+				return 1
+			fi
+			;;
+		--ws)
+			enable_ws="true"
+			shift
+			;;
 		--help | -h)
 			show_start_help
 			return 0
@@ -408,6 +497,11 @@ cmd_start() {
 			;;
 		esac
 	done
+
+	if [[ "${enable_ws}" != "true" ]] && [[ -n "${explicit_ws_addr}" || -n "${explicit_ws_port}" || -n "${explicit_ws_origins}" ]]; then
+		log_error "--ws.addr, --ws.port, and --ws.origin require --ws"
+		return 1
+	fi
 
 	# -------------------------------------------------------------------------
 	# [STEP 2] Configuration File Validation
@@ -1484,7 +1578,7 @@ EOF
 				log_info "Starting nodes with docker-compose..."
 				
 				# Generate docker-compose.yml
-				generate_docker_compose "${beranodes_dir}" "${config_json_path}" "${docker_beacond_tag}" "${docker_berareth_tag}"
+				generate_docker_compose "${beranodes_dir}" "${config_json_path}" "${docker_beacond_tag}" "${docker_berareth_tag}" "${explicit_bootnodes}" "${explicit_trusted_peers}" "${enable_ws}" "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}"
 				
 				# Change to the beranodes directory for docker-compose context
 				local compose_file="${beranodes_dir}/tmp/docker-compose.yml"
@@ -1599,14 +1693,16 @@ EOF
 						else
 							nat_arg=""
 						fi
-						local seed_dir="${beranode_dir}${BERANODES_PATH_TMP}/seed-data-$(network_chain_id "${network}")"
-						ensure_el_enode_files "${network}" "${seed_dir}" || true
-						local official_bootnodes official_peers
-						official_bootnodes="$(parse_el_enodes "${seed_dir}/el-bootnodes.txt")"
-						official_peers="$(parse_el_enodes "${seed_dir}/el-peers.txt")"
-						configtoml_berareth_bootnodes="$(merge_enodes "${configtoml_berareth_bootnodes}" "${official_bootnodes}")"
-						configtoml_berareth_trusted_peers="$(merge_enodes "${configtoml_berareth_trusted_peers}" "${official_peers}")"
 					fi
+					configtoml_berareth_bootnodes="$(resolve_reth_enodes "${network}" "${configtoml_berareth_bootnodes}" "${explicit_bootnodes}")"
+					configtoml_berareth_trusted_peers="$(resolve_reth_enodes "${network}" "${configtoml_berareth_trusted_peers}" "${explicit_trusted_peers}")"
+
+					local reth_ws_flags=()
+					local reth_ws_flag
+					while IFS= read -r reth_ws_flag; do
+						[[ -z "${reth_ws_flag}" ]] && continue
+						reth_ws_flags+=("${reth_ws_flag}")
+					done <<< "$(format_reth_ws_flags "${enable_ws}" "${explicit_ws_addr}" "${explicit_ws_port}" "${explicit_ws_origins}" "${el_ws_port}")"
 					
 					${bin_bera_reth} node \
 						$([[ -z "${configtoml_berareth_bootnodes}" ]] || echo --bootnodes="${configtoml_berareth_bootnodes}") \
@@ -1627,10 +1723,7 @@ EOF
 						--http.port="${el_ethrpc_port}" \
 						--http.corsdomain="*" \
 						--port="${el_eth_port}" \
-						--ws \
-						--ws.addr=0.0.0.0 \
-						--ws.port="${el_ws_port}" \
-						--ws.origins="*" \
+						${reth_ws_flags[@]+"${reth_ws_flags[@]}"} \
 						&>"${beranode_dir}${BERANODES_PATH_LOGS}/${base_moniker}-${node_index}-${role_short}-bera-reth.log" &
 					local pid=$!
 					echo "${pid}" >"${beranode_dir}${BERANODES_PATH_RUNS}/${base_moniker}-${node_index}-${role_short}-bera-reth.pid"
