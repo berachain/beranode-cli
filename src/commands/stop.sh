@@ -16,8 +16,9 @@ networks defined in the generated docker-compose.yml.
 
 In local mode, stops processes by their PIDs stored in the runs directory.
 
-In serviceman mode, unloads launchd jobs (macOS) and removes user LaunchAgents
-for this node set. Copies of the plists remain in beranodes/services/.
+In serviceman mode, unloads the host service manager jobs for this node set
+(macOS launchd LaunchAgents, or Linux systemd user units) and removes the
+installed unit files. Copies remain in beranodes/services/.
 
 Options:
   --beranodes-dir <path>    Specify the beranodes directory path
@@ -216,13 +217,13 @@ _stop_local_mode() {
 }
 
 # =============================================================================
-# [SECTION 5] Serviceman Mode Stop (launchd)
+# [SECTION 5] Serviceman Mode Stop (launchd / systemd)
 # =============================================================================
 
 _stop_serviceman_mode() {
 	local beranodes_dir="$1"
 
 	log_info "Mode: serviceman"
-	serviceman_require_launchd || return 1
+	serviceman_require || return 1
 	serviceman_stop_all "${beranodes_dir}"
 }

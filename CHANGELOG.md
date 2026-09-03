@@ -21,6 +21,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.12.0] - 2026-09-03
+
+### Summary
+
+`beranode init --force` (`--yes` / `-y`) wipes an existing `beranodes/` directory, including `snapshots/`, for a fresh start without prompting. `beranode deps` detects the host OS and package manager, logs tool versions, and can install missing dependencies locally. Linux `serviceman` mode runs the same native binaries under systemd user units with journald logs. `beranode status` reports per-binary memory and a SNAPSHOT column.
+
+### Added
+
+- `beranode init --force` (`--yes` / `-y`): wipe an existing `beranodes/` directory and re-initialize without the confirmation prompt, including `snapshots/`. Also overwrites `beranodes.config.json` if it is still present after the wipe
+- Linux `beranode init --mode serviceman` / `--serviceman`: systemd user units (`~/.config/systemd/user/com.berachain.beranode.*`) plus journald. Init checks that `systemctl`, `journalctl`, systemd-as-init, the journal socket, and `systemctl --user` are present (fails instead of falling back to local). `Restart=always` (10s) matches launchd KeepAlive; `stop` disables and removes the user units. Logs go to journald (`journalctl --user -u <unit> -f`) and are mirrored to `beranodes/logs/`; unit copies and `systemd.json` live in `beranodes/services/`
+- `beranode deps`: check curl, wget, gzip, tar, lz4, jq, Foundry (`cast`), and Rust (`rustc`). Logs OS, package-manager, and tool versions. Prompts to install missing tools locally (Homebrew on macOS; apt, apk, dnf, yum, pacman, or zypper on Linux). Foundry/Rust use brew formulae when Homebrew is present, otherwise foundryup (`~/.foundry`) and rustup (`~/.cargo`). `--check` reports only; `--yes` skips the prompt
+- README init/start state decision tree: lifecycle, keep-vs-wipe prompts, and public vs devnet branches
+- `beranode status` Memory footer: per-binary RSS of `beacond` and `bera-reth` as used/total host RAM. Local/serviceman use process RSS (`/proc/<pid>/statm` on Linux, `ps` on macOS); launchd and systemd PIDs are resolved per backend (systemd prefers the binary child of the log-tee wrapper). Docker mode uses `docker stats` on both platforms. Total RAM is `sysctl hw.memsize` on macOS and `MemTotal` from `/proc/meminfo` on Linux. In `--watch`, memory is refreshed every 5 seconds
+- `beranode status` SNAPSHOT column: `pruned` or `archive` per node from `snapshot_type` (role mapping when that field is missing). Also included as `snapshot_type` in `--json`
+
+### Changed
+
+- `beranode init --validators` also accepts `--vals`. `--full-nodes` and `--pruned-nodes` are replaced by `--rpcs`. RPC nodes use role `rpc` (directory `N-rpc`)
+- `--snapshot-type` defaults to `pruned` and fetches pruned snapshots; `--snapshot-type=archive` fetches archive snapshots. Equals-form flags (`--flag=value`) are accepted on init
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+- GitHub Release workflow pins `actions/checkout` to a full-length commit SHA so the `vX.Y.Z` tag job can run under repository action rules
+
+### Security
+
 ## [0.11.0] - 2026-09-02
 
 ### Summary
@@ -434,7 +464,8 @@ Add version management with description support and changelog automation
 - Node management commands
 - Network configuration support
 
-[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/berachain/beranode-cli/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/berachain/beranode-cli/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/berachain/beranode-cli/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/berachain/beranode-cli/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/berachain/beranode-cli/compare/v0.8.0...v0.9.0

@@ -199,3 +199,29 @@ shift_args() {
 		echo 1
 	fi
 }
+
+################################################################################
+# Function: split_equals_flag
+# Description: Splits --flag=value into --flag and value so parsers can treat
+#              equals-form and space-separated options the same way.
+#
+# Arguments:
+#   $1 - current argument (e.g. --snapshot-type=archive)
+#
+# Returns:
+#   0 - $1 was --flag=value (prints: flag<TAB>value)
+#   1 - $1 was not equals-form
+#
+# Example:
+#   if split=$(split_equals_flag "$1"); then
+#       set -- "${split%%$'\t'*}" "${split#*$'\t'}" "${@:2}"
+#   fi
+################################################################################
+split_equals_flag() {
+	local arg="${1:-}"
+	if [[ "$arg" == --*=* ]]; then
+		printf '%s\t%s\n' "${arg%%=*}" "${arg#*=}"
+		return 0
+	fi
+	return 1
+}

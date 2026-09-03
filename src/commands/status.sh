@@ -9,6 +9,7 @@ set -euo pipefail
 # of each node in a formatted table.
 #
 # For each node it queries:
+#   - Snapshot type (pruned or archive) from config + role
 #   - Execution Layer (bera-reth): block height and peer count via JSON-RPC
 #   - Consensus Layer (beacond): sync status, block height, block time,
 #     peer count, and catching-up flag via CometBFT HTTP RPC
@@ -16,6 +17,7 @@ set -euo pipefail
 #     bepolia/mainnet only (omitted on devnet), refreshed every 10 seconds
 #   - Docker container status (when running in docker mode)
 #   - Host storage: volume capacity/used, plus `beranodes/nodes` directory size
+#   - Host memory: per-binary RSS (beacond / bera-reth) out of total RAM
 #
 # VERSION CONTEXT - Beranode CLI v0.9.0
 #
@@ -46,6 +48,32 @@ set -euo pipefail
 #    └─ status_query_one_node()   : One node's EL/CL fields as JSON
 #    └─ status_collect_nodes_json(): JSON array of all node status objects
 #
+# [SECTION 2c] Memory Helpers
+#    └─ status_role_short()       : validator → val (compose/pid naming)
+#    └─ status_binary_label()     : val-0-bera-reth style process name
+#    └─ status_query_total_ram_bytes() : Host RAM (macOS sysctl / Linux meminfo)
+#    └─ status_parse_mem_size()   : "4.40GiB" / "500MiB" → bytes
+#    └─ status_parse_docker_mem_used() : docker stats MemUsage → used bytes
+#    └─ status_format_mem_used()  : bytes → "4.4gb" (binary GB, 1 decimal)
+#    └─ status_format_mem_total() : bytes → "64gb" (binary GB, integer)
+#    └─ status_pid_rss_bytes()    : RSS via /proc/statm (Linux) or ps (macOS)
+#    └─ status_docker_find_container() : Resolve a running compose container name
+#    └─ status_docker_rss_bytes() : Look up one container in cached docker stats
+#    └─ status_component_rss_bytes() : RSS for one binary (local/docker/serviceman)
+#    └─ status_refresh_memory()   : Cached total RAM + per-binary RSS
+#    └─ status_memory_json()      : Memory object for --json
+#    └─ status_print_memory_footer() : Human-readable Memory section
+#
+# [SECTION 2d] CPU Helpers
+#    └─ status_query_cpu_count()  : Logical CPU count (nproc / sysctl / cpuinfo)
+#    └─ status_pid_cpu_percent()  : Per-PID CPU% via ps (×100, centi-percent)
+#    └─ status_parse_docker_cpu_perc() : docker stats CPUPerc → centi-percent
+#    └─ status_docker_cpu_centi() : Look up one container in cached docker stats
+#    └─ status_component_cpu_centi() : CPU for one binary (local/docker/serviceman)
+#    └─ status_refresh_cpu()      : Cached CPU count + per-binary CPU usage
+#    └─ status_cpu_json()         : CPU object for --json
+#    └─ status_print_cpu_footer() : Human-readable CPU section
+#
 # [SECTION 3] Table Formatting
 #    └─ print_status_row()        : Render a compact-mode row
 #    └─ print_verbose_row()       : Render a verbose-mode row
@@ -73,13 +101,27 @@ Usage: beranode status [OPTIONS]
 Display the live status of all Berachain nodes defined in the configuration.
 
 Reads beranodes.config.json and queries each node's Execution Layer (bera-reth)
-and Consensus Layer (beacond) endpoints to report block height, peer count,
-sync status, and more. For bepolia/mainnet, also queries the public RPC for
-LIVE EL BLOCK (refreshed every 10 seconds in --watch mode).
+and Consensus Layer (beacond) endpoints to report snapshot type (pruned or
+archive), block height, peer count, sync status, and more. For bepolia/mainnet,
+also queries the public RPC for LIVE EL BLOCK (refreshed every 10 seconds in
+--watch mode).
 
 Also reports host storage: total volume capacity, space used on the device,
 and the size of beranodes/nodes (as a percent of total). On macOS this uses
 APFS container totals from diskutil (df as fallback); on Linux it uses df.
+
+Also reports host memory: each running beacond / bera-reth binary as
+used/total RAM (for example val-0-bera-reth: 4.1gb/64gb (6.47%)). RSS comes
+from /proc/<pid>/statm on Linux and ps on macOS; Docker mode uses
+docker stats (works on Docker Desktop and Linux). Total RAM is
+sysctl hw.memsize on macOS and MemTotal from /proc/meminfo on Linux.
+
+Also reports host CPU: each running beacond / bera-reth binary as its share of
+total CPU capacity across all logical cores (for example
+val-0-bera-reth: 92.3%/800% (11.54%) on an 8-core host). CPU% comes from
+ps on local/serviceman nodes and docker stats CPUPerc in Docker mode; both
+report on a single-core baseline, so the value is divided by the logical CPU
+count to express it as a percent of total utilization.
 
 Options:
   --verbose|-v              Show each service (beacond, bera-reth) as its own row
@@ -657,6 +699,767 @@ status_print_storage_footer() {
 	printf "    Nodes directory:  %s.%s GB (%s%%)\n" "$(status_comma "${nodes_int}")" "${nodes_frac}" "${nodes_pct}"
 }
 
+# =============================================================================
+# [SECTION 2c] Memory Helpers
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Function: status_role_short
+# Description: Short role token used in compose service names and PID files.
+# Arguments:
+#   $1 - role (string): validator | rpc | rpc-full | rpc-pruned | ...
+# Returns:
+#   Prints val | rpc | or the original role
+# -----------------------------------------------------------------------------
+status_role_short() {
+	local role="$1"
+	case "${role}" in
+	validator) echo "val" ;;
+	rpc) echo "rpc" ;;
+	full_node) echo "full" ;;
+	pruned_node) echo "pruned" ;;
+	*) echo "${role}" ;;
+	esac
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_binary_label
+# Description: Human-readable process label, e.g. val-0-bera-reth.
+# Arguments:
+#   $1 - index (integer): Node index (0-based)
+#   $2 - role (string)
+#   $3 - component (string): beacond | bera-reth
+# -----------------------------------------------------------------------------
+status_binary_label() {
+	echo "$(status_role_short "$2")-${1}-${3}"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_query_total_ram_bytes
+# Description: Installed / visible host RAM in bytes.
+#              macOS: sysctl hw.memsize. Linux: /proc/meminfo MemTotal.
+#              Tries both so Linux VMs and unusual environments still work.
+# Returns:
+#   Prints integer bytes, or 0 on failure
+# -----------------------------------------------------------------------------
+status_query_total_ram_bytes() {
+	local n
+	if command -v sysctl >/dev/null 2>&1; then
+		n=$(sysctl -n hw.memsize 2>/dev/null) || n=""
+		if [[ "${n}" =~ ^[0-9]+$ && "${n}" -gt 0 ]]; then
+			echo "${n}"
+			return 0
+		fi
+	fi
+	if [[ -r /proc/meminfo ]]; then
+		local kb
+		kb=$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null) || kb=""
+		if [[ "${kb}" =~ ^[0-9]+$ && "${kb}" -gt 0 ]]; then
+			echo $((kb * 1024))
+			return 0
+		fi
+	fi
+	echo 0
+	return 1
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_parse_mem_size
+# Description: Parses a docker-stats size like 4.40GiB, 500MiB, or 1.5GB.
+#              GiB/MiB/KiB are 1024-based; GB/MB/KB are 1000-based.
+# Arguments:
+#   $1 - size (string)
+# Returns:
+#   Prints integer bytes (0 on failure)
+# -----------------------------------------------------------------------------
+status_parse_mem_size() {
+	local raw="$1"
+	raw=$(printf '%s' "${raw}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+	if [[ -z "${raw}" || "${raw}" == "--" ]]; then
+		echo 0
+		return 1
+	fi
+	local num unit
+	num=$(printf '%s' "${raw}" | sed -E 's/^([0-9]+(\.[0-9]+)?).*/\1/')
+	unit=$(printf '%s' "${raw}" | sed -E 's/^[0-9]+(\.[0-9]+)?//')
+	unit=$(printf '%s' "${unit}" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g')
+	if [[ -z "${num}" ]]; then
+		echo 0
+		return 1
+	fi
+	local mult=1
+	case "${unit}" in
+	kib | ki) mult=1024 ;;
+	mib | mi) mult=1048576 ;;
+	gib | gi) mult=1073741824 ;;
+	tib | ti) mult=1099511627776 ;;
+	k | kb) mult=1000 ;;
+	m | mb) mult=1000000 ;;
+	g | gb) mult=1000000000 ;;
+	t | tb) mult=1000000000000 ;;
+	b | "") mult=1 ;;
+	*)
+		echo 0
+		return 1
+		;;
+	esac
+	awk -v n="${num}" -v m="${mult}" 'BEGIN { printf "%.0f\n", n * m }'
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_parse_docker_mem_used
+# Description: Extracts the used side of docker stats MemUsage
+#              ("4.40GiB / 7.654GiB") and converts it to bytes.
+# Arguments:
+#   $1 - mem_usage (string): Full MemUsage field from docker stats
+# -----------------------------------------------------------------------------
+status_parse_docker_mem_used() {
+	local usage="$1"
+	local used="${usage%%/*}"
+	status_parse_mem_size "${used}"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_format_mem_used
+# Description: Binary GB (GiB) with one fraction digit, lowercase unit (4.4gb).
+#              Binary so the numbers line up with what macOS/Linux report as
+#              installed RAM.
+# Arguments:
+#   $1 - bytes (integer)
+# -----------------------------------------------------------------------------
+status_format_mem_used() {
+	local b="$1"
+	if [[ -z "${b}" || ! "${b}" =~ ^[0-9]+$ ]]; then
+		echo "--"
+		return 0
+	fi
+	local tenths=$(((b * 10 + 536870912) / 1073741824))
+	printf '%s.%sgb' "$((tenths / 10))" "$((tenths % 10))"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_format_mem_total
+# Description: Binary GB (GiB) as an integer, lowercase unit (64gb).
+#              Rounds so 68.72e9 bytes prints as 64gb, matching the advertised
+#              RAM size rather than the decimal-GB equivalent.
+# Arguments:
+#   $1 - bytes (integer)
+# -----------------------------------------------------------------------------
+status_format_mem_total() {
+	local b="$1"
+	if [[ -z "${b}" || ! "${b}" =~ ^[0-9]+$ || "${b}" -eq 0 ]]; then
+		echo "--"
+		return 0
+	fi
+	printf '%sgb' "$(((b + 536870912) / 1073741824))"
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_pid_rss_bytes
+# Description: Resident set size for a PID. Prefers /proc/<pid>/statm on Linux
+#              (works without procps). Falls back to `ps -o rss=` (KB) on macOS
+#              and other Unixes.
+# Arguments:
+#   $1 - pid (integer)
+# Returns:
+#   Prints bytes; return 0 if the process was found, 1 otherwise
+# -----------------------------------------------------------------------------
+status_pid_rss_bytes() {
+	local pid="$1"
+	if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
+		echo 0
+		return 1
+	fi
+	if [[ -r "/proc/${pid}/statm" ]]; then
+		local pages pagesize
+		pages=$(awk '{print $2}' "/proc/${pid}/statm" 2>/dev/null) || pages=""
+		pagesize=$(getconf PAGE_SIZE 2>/dev/null) || pagesize=4096
+		if [[ "${pages}" =~ ^[0-9]+$ && "${pagesize}" =~ ^[0-9]+$ ]]; then
+			echo $((pages * pagesize))
+			return 0
+		fi
+	fi
+	local rss_kb
+	rss_kb=$(ps -o rss= -p "${pid}" 2>/dev/null | tr -d ' \t') || rss_kb=""
+	if [[ ! "${rss_kb}" =~ ^[0-9]+$ ]]; then
+		rss_kb=$(ps -p "${pid}" -o rss= 2>/dev/null | tr -d ' \t') || rss_kb=""
+	fi
+	if [[ "${rss_kb}" =~ ^[0-9]+$ ]]; then
+		echo $((rss_kb * 1024))
+		return 0
+	fi
+	echo 0
+	return 1
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_docker_find_container
+# Description: Resolves a running container name for one node component.
+#              Exact compose name first (index-role-moniker-component), then a
+#              prefix/suffix match. Avoids treating ".*" as a docker name regex
+#              (name filters are substrings and differ across Docker versions).
+# Arguments:
+#   $1 - index  $2 - role_short  $3 - component
+# Caller-scoped: moniker, memory_docker_ps (optional running-name list)
+# -----------------------------------------------------------------------------
+status_docker_find_container() {
+	local index="$1"
+	local role_short="$2"
+	local component="$3"
+	local exact="${index}-${role_short}-${moniker}-${component}"
+	local names="${memory_docker_ps:-}"
+	if [[ -z "${names}" ]]; then
+		names=$(docker ps --format '{{.Names}}' 2>/dev/null) || names=""
+	fi
+	[[ -z "${names}" ]] && return 1
+	local found
+	found=$(printf '%s\n' "${names}" | awk -v e="${exact}" -v p="${index}-${role_short}-" -v c="-${component}" '
+		$0 == e { print; exit 0 }
+		index($0, p) == 1 && index($0, c) == (length($0) - length(c) + 1) { print; exit 0 }
+	')
+	if [[ -z "${found}" ]]; then
+		return 1
+	fi
+	echo "${found}"
+	return 0
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_docker_rss_bytes
+# Description: Looks up one running container's used memory from the cached
+#              docker stats blob (name|MemUsage lines).
+# Arguments:
+#   $1 - index  $2 - role_short  $3 - component
+# Caller-scoped: memory_docker_stats, memory_docker_ps, moniker
+# Returns:
+#   Prints bytes; return 0 if found, 1 otherwise
+# -----------------------------------------------------------------------------
+status_docker_rss_bytes() {
+	local index="$1"
+	local role_short="$2"
+	local component="$3"
+	local name used
+	name=$(status_docker_find_container "${index}" "${role_short}" "${component}") || name=""
+	if [[ -z "${name}" ]]; then
+		echo 0
+		return 1
+	fi
+	used=$(printf '%s\n' "${memory_docker_stats}" | awk -F'|' -v n="${name}" '$1 == n { print $2; exit }')
+	if [[ -z "${used}" ]]; then
+		echo 0
+		return 1
+	fi
+	status_parse_docker_mem_used "${used}"
+	return 0
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_component_rss_bytes
+# Description: RSS for one node's beacond or bera-reth process.
+#              local: PID file under beranodes/runs
+#              serviceman: launchd PID (macOS) or systemd MainPID (Linux)
+#              docker: docker stats (macOS Docker Desktop + Linux)
+# Arguments:
+#   $1 - mode  $2 - index  $3 - role  $4 - component
+# Caller-scoped: beranodes_dir, moniker, memory_docker_stats
+# Returns:
+#   Prints bytes; return 0 if the process was found
+# -----------------------------------------------------------------------------
+status_component_rss_bytes() {
+	local mode="$1"
+	local index="$2"
+	local role="$3"
+	local component="$4"
+	local role_short pid pidfile
+	role_short=$(status_role_short "${role}")
+
+	case "${mode}" in
+	docker)
+		status_docker_rss_bytes "${index}" "${role_short}" "${component}"
+		return $?
+		;;
+	serviceman)
+		pid=$(serviceman_component_pid "${beranodes_dir}" "${moniker}" "${index}" "${component}" 2>/dev/null) || pid=""
+		status_pid_rss_bytes "${pid}"
+		return $?
+		;;
+	*)
+		pidfile="${beranodes_dir}${BERANODES_PATH_RUNS}/${moniker}-${index}-${role_short}-${component}.pid"
+		if [[ ! -f "${pidfile}" ]]; then
+			echo 0
+			return 1
+		fi
+		pid=$(tr -d ' \t\n\r' <"${pidfile}")
+		status_pid_rss_bytes "${pid}"
+		return $?
+		;;
+	esac
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_refresh_memory
+# Description: Updates caller-scoped memory_* locals (cached in --watch).
+# Caller-scoped: beranodes_dir, moniker, mode, nodes_json, nodes_count,
+#   memory_total_b, memory_ok, memory_fetched_at, memory_processes_json,
+#   memory_docker_stats
+# -----------------------------------------------------------------------------
+status_refresh_memory() {
+	local now
+	now=$(date +%s 2>/dev/null) || now=0
+
+	if [[ ${memory_fetched_at} -gt 0 && ${now} -gt 0 ]]; then
+		local elapsed=$((now - memory_fetched_at))
+		if [[ ${elapsed} -lt ${MEMORY_REFRESH_SECONDS} ]]; then
+			return 0
+		fi
+	fi
+
+	memory_total_b=$(status_query_total_ram_bytes) || memory_total_b=0
+	if [[ "${memory_total_b}" =~ ^[0-9]+$ && "${memory_total_b}" -gt 0 ]]; then
+		memory_ok="true"
+	else
+		memory_ok="false"
+	fi
+
+	memory_docker_stats=""
+	memory_docker_ps=""
+	if [[ "${mode}" == "docker" ]]; then
+		memory_docker_ps=$(docker ps --format '{{.Names}}' 2>/dev/null) || memory_docker_ps=""
+		local names=()
+		local i node_json role role_short cname
+		for ((i = 0; i < nodes_count; i++)); do
+			node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+			role=$(echo "${node_json}" | jq -r '.role')
+			role_short=$(status_role_short "${role}")
+			cname=$(status_docker_find_container "${i}" "${role_short}" "bera-reth") || cname=""
+			[[ -n "${cname}" ]] && names+=("${cname}")
+			cname=$(status_docker_find_container "${i}" "${role_short}" "beacond") || cname=""
+			[[ -n "${cname}" ]] && names+=("${cname}")
+		done
+		if [[ ${#names[@]} -gt 0 ]]; then
+			memory_docker_stats=$(docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}' "${names[@]}" 2>/dev/null) || memory_docker_stats=""
+		fi
+	fi
+
+	local arr="[]"
+	local i node_json role component label rss found obj
+	for ((i = 0; i < nodes_count; i++)); do
+		node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+		role=$(echo "${node_json}" | jq -r '.role')
+		for component in bera-reth beacond; do
+			label=$(status_binary_label "${i}" "${role}" "${component}")
+			found="false"
+			rss=0
+			if rss=$(status_component_rss_bytes "${mode}" "${i}" "${role}" "${component}"); then
+				found="true"
+			else
+				rss=0
+			fi
+			obj=$(jq -n \
+				--arg name "${label}" \
+				--arg component "${component}" \
+				--argjson index "${i}" \
+				--arg found "${found}" \
+				--argjson rss "${rss}" \
+				'{
+					name: $name,
+					component: $component,
+					index: $index,
+					found: ($found == "true"),
+					rss_bytes: (if $found == "true" then $rss else null end)
+				}')
+			arr=$(echo "${arr}" | jq -c --argjson n "${obj}" '. + [$n]')
+		done
+	done
+	memory_processes_json="${arr}"
+	memory_fetched_at=${now}
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_memory_json
+# Description: JSON object for the Memory section. Uses caller-scoped memory_*.
+# -----------------------------------------------------------------------------
+status_memory_json() {
+	local total_json="null"
+	local total_gb_json="null"
+	if [[ "${memory_ok}" == "true" ]]; then
+		total_json="${memory_total_b}"
+		total_gb_json=$(awk -v b="${memory_total_b}" 'BEGIN { printf "%.2f", b / 1073741824 }')
+	fi
+
+	jq -n \
+		--argjson total_bytes "${total_json}" \
+		--argjson total_gb "${total_gb_json}" \
+		--argjson total_ram "${memory_total_b:-0}" \
+		--argjson processes "${memory_processes_json:-[]}" \
+		'{
+			total_bytes: $total_bytes,
+			total_gb: $total_gb,
+			processes: ($processes | map({
+				name: .name,
+				component: .component,
+				index: .index,
+				rss_bytes: .rss_bytes,
+				rss_gb: (if .rss_bytes == null then null else (((.rss_bytes / 1073741824) * 100 | round) / 100) end),
+				percent: (if .rss_bytes == null or $total_ram == 0 then null else ((.rss_bytes / $total_ram) * 100) end)
+			}))
+		}'
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_print_memory_footer
+# Description: Human-readable Memory block under Storage.
+#              Example: val-0-bera-reth: 4.1gb/64gb (6.47%)
+# -----------------------------------------------------------------------------
+status_print_memory_footer() {
+	echo -e "  ${BOLD}Memory:${RESET}"
+
+	local count i name rss used total pct width
+	count=$(echo "${memory_processes_json}" | jq 'length')
+	width=$(echo "${memory_processes_json}" | jq '[.[].name | length] | max // 0')
+	[[ "${width}" -lt 1 ]] && width=16
+
+	if [[ "${count}" -eq 0 ]]; then
+		if [[ "${memory_ok}" != "true" ]]; then
+			echo "    Total RAM:         --"
+		fi
+		echo "    (no processes)"
+		return 0
+	fi
+
+	total=$(status_format_mem_total "${memory_total_b}")
+	for ((i = 0; i < count; i++)); do
+		name=$(echo "${memory_processes_json}" | jq -r ".[$i].name")
+		rss=$(echo "${memory_processes_json}" | jq -r ".[$i].rss_bytes")
+		if [[ "${rss}" == "null" || -z "${rss}" ]]; then
+			printf "    %-*s: --\n" "${width}" "${name}"
+		elif [[ "${memory_ok}" != "true" ]]; then
+			used=$(status_format_mem_used "${rss}")
+			printf "    %-*s: %s/--\n" "${width}" "${name}" "${used}"
+		else
+			used=$(status_format_mem_used "${rss}")
+			pct=$(status_percent "${rss}" "${memory_total_b}" 2)
+			printf "    %-*s: %s/%s (%s%%)\n" "${width}" "${name}" "${used}" "${total}" "${pct}"
+		fi
+	done
+}
+
+# =============================================================================
+# [SECTION 2d] CPU Helpers
+# =============================================================================
+#
+# CPU usage is reported per binary as a share of the *total* machine CPU
+# capacity (all logical cores). `ps` and `docker stats` both report CPU% on a
+# single-core baseline (a process pinning one full core reads ~100%, and can
+# exceed 100% across multiple cores). To relate that to total utilization we
+# divide by the logical CPU count, so a process using one full core on an
+# 8-core host shows as 12.50% of total.
+#
+# CPU percentages are carried internally as integer "centi-percent" (percent
+# × 100) so bash 3.2 arithmetic keeps two decimals without floating point.
+
+# -----------------------------------------------------------------------------
+# Function: status_query_cpu_count
+# Description: Number of logical CPUs on the host.
+#              Linux: nproc, falling back to /proc/cpuinfo.
+#              macOS/other: sysctl -n hw.ncpu.
+# Returns:
+#   Prints integer count, or 0 (return 1) if it cannot be determined
+# -----------------------------------------------------------------------------
+status_query_cpu_count() {
+	local n
+	if command -v nproc >/dev/null 2>&1; then
+		n=$(nproc 2>/dev/null) || n=""
+		if [[ "${n}" =~ ^[0-9]+$ && "${n}" -gt 0 ]]; then
+			echo "${n}"
+			return 0
+		fi
+	fi
+	if command -v sysctl >/dev/null 2>&1; then
+		n=$(sysctl -n hw.ncpu 2>/dev/null) || n=""
+		if [[ "${n}" =~ ^[0-9]+$ && "${n}" -gt 0 ]]; then
+			echo "${n}"
+			return 0
+		fi
+	fi
+	if [[ -r /proc/cpuinfo ]]; then
+		n=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null) || n=""
+		if [[ "${n}" =~ ^[0-9]+$ && "${n}" -gt 0 ]]; then
+			echo "${n}"
+			return 0
+		fi
+	fi
+	echo 0
+	return 1
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_pid_cpu_percent
+# Description: CPU usage for a PID via `ps -o %cpu`, returned as centi-percent
+#              (percent × 100) on a single-core baseline.
+# Arguments:
+#   $1 - pid (integer)
+# Returns:
+#   Prints centi-percent; return 0 if the process was found, 1 otherwise
+# -----------------------------------------------------------------------------
+status_pid_cpu_percent() {
+	local pid="$1"
+	if [[ -z "${pid}" || ! "${pid}" =~ ^[0-9]+$ ]]; then
+		echo 0
+		return 1
+	fi
+	local cpu
+	cpu=$(ps -o %cpu= -p "${pid}" 2>/dev/null | tr -d ' \t') || cpu=""
+	if [[ -z "${cpu}" ]]; then
+		cpu=$(ps -p "${pid}" -o %cpu= 2>/dev/null | tr -d ' \t') || cpu=""
+	fi
+	if [[ ! "${cpu}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+		echo 0
+		return 1
+	fi
+	awk -v c="${cpu}" 'BEGIN { printf "%.0f\n", c * 100 }'
+	return 0
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_parse_docker_cpu_perc
+# Description: Parses a docker stats CPUPerc field ("12.34%") into
+#              centi-percent (percent × 100).
+# Arguments:
+#   $1 - cpu_perc (string): CPUPerc field from docker stats
+# -----------------------------------------------------------------------------
+status_parse_docker_cpu_perc() {
+	local raw="$1"
+	raw=$(printf '%s' "${raw}" | tr -d ' \t%')
+	if [[ -z "${raw}" || "${raw}" == "--" ]]; then
+		echo 0
+		return 1
+	fi
+	if [[ ! "${raw}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+		echo 0
+		return 1
+	fi
+	awk -v c="${raw}" 'BEGIN { printf "%.0f\n", c * 100 }'
+	return 0
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_docker_cpu_centi
+# Description: Looks up one running container's CPU usage from the cached
+#              docker stats blob (name|CPUPerc lines).
+# Arguments:
+#   $1 - index  $2 - role_short  $3 - component
+# Caller-scoped: cpu_docker_stats, memory_docker_ps, moniker
+# Returns:
+#   Prints centi-percent; return 0 if found, 1 otherwise
+# -----------------------------------------------------------------------------
+status_docker_cpu_centi() {
+	local index="$1"
+	local role_short="$2"
+	local component="$3"
+	local name used
+	name=$(status_docker_find_container "${index}" "${role_short}" "${component}") || name=""
+	if [[ -z "${name}" ]]; then
+		echo 0
+		return 1
+	fi
+	used=$(printf '%s\n' "${cpu_docker_stats}" | awk -F'|' -v n="${name}" '$1 == n { print $2; exit }')
+	if [[ -z "${used}" ]]; then
+		echo 0
+		return 1
+	fi
+	status_parse_docker_cpu_perc "${used}"
+	return 0
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_component_cpu_centi
+# Description: CPU usage (centi-percent) for one node's beacond or bera-reth.
+#              local: PID file under beranodes/runs
+#              serviceman: launchd PID (macOS) or systemd MainPID (Linux)
+#              docker: docker stats (macOS Docker Desktop + Linux)
+# Arguments:
+#   $1 - mode  $2 - index  $3 - role  $4 - component
+# Caller-scoped: beranodes_dir, moniker, cpu_docker_stats
+# Returns:
+#   Prints centi-percent; return 0 if the process was found
+# -----------------------------------------------------------------------------
+status_component_cpu_centi() {
+	local mode="$1"
+	local index="$2"
+	local role="$3"
+	local component="$4"
+	local role_short pid pidfile
+	role_short=$(status_role_short "${role}")
+
+	case "${mode}" in
+	docker)
+		status_docker_cpu_centi "${index}" "${role_short}" "${component}"
+		return $?
+		;;
+	serviceman)
+		pid=$(serviceman_component_pid "${beranodes_dir}" "${moniker}" "${index}" "${component}" 2>/dev/null) || pid=""
+		status_pid_cpu_percent "${pid}"
+		return $?
+		;;
+	*)
+		pidfile="${beranodes_dir}${BERANODES_PATH_RUNS}/${moniker}-${index}-${role_short}-${component}.pid"
+		if [[ ! -f "${pidfile}" ]]; then
+			echo 0
+			return 1
+		fi
+		pid=$(tr -d ' \t\n\r' <"${pidfile}")
+		status_pid_cpu_percent "${pid}"
+		return $?
+		;;
+	esac
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_refresh_cpu
+# Description: Updates caller-scoped cpu_* locals (cached in --watch).
+# Caller-scoped: beranodes_dir, moniker, mode, nodes_json, nodes_count,
+#   cpu_count, cpu_ok, cpu_fetched_at, cpu_processes_json, cpu_docker_stats
+# -----------------------------------------------------------------------------
+status_refresh_cpu() {
+	local now
+	now=$(date +%s 2>/dev/null) || now=0
+
+	if [[ ${cpu_fetched_at} -gt 0 && ${now} -gt 0 ]]; then
+		local elapsed=$((now - cpu_fetched_at))
+		if [[ ${elapsed} -lt ${CPU_REFRESH_SECONDS} ]]; then
+			return 0
+		fi
+	fi
+
+	cpu_count=$(status_query_cpu_count) || cpu_count=0
+	if [[ "${cpu_count}" =~ ^[0-9]+$ && "${cpu_count}" -gt 0 ]]; then
+		cpu_ok="true"
+	else
+		cpu_ok="false"
+		cpu_count=0
+	fi
+
+	cpu_docker_stats=""
+	if [[ "${mode}" == "docker" ]]; then
+		local names=()
+		local i node_json role role_short cname
+		for ((i = 0; i < nodes_count; i++)); do
+			node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+			role=$(echo "${node_json}" | jq -r '.role')
+			role_short=$(status_role_short "${role}")
+			cname=$(status_docker_find_container "${i}" "${role_short}" "bera-reth") || cname=""
+			[[ -n "${cname}" ]] && names+=("${cname}")
+			cname=$(status_docker_find_container "${i}" "${role_short}" "beacond") || cname=""
+			[[ -n "${cname}" ]] && names+=("${cname}")
+		done
+		if [[ ${#names[@]} -gt 0 ]]; then
+			cpu_docker_stats=$(docker stats --no-stream --format '{{.Name}}|{{.CPUPerc}}' "${names[@]}" 2>/dev/null) || cpu_docker_stats=""
+		fi
+	fi
+
+	local arr="[]"
+	local i node_json role component label centi found obj
+	for ((i = 0; i < nodes_count; i++)); do
+		node_json=$(echo "${nodes_json}" | jq -c ".[$i]")
+		role=$(echo "${node_json}" | jq -r '.role')
+		for component in bera-reth beacond; do
+			label=$(status_binary_label "${i}" "${role}" "${component}")
+			found="false"
+			centi=0
+			if centi=$(status_component_cpu_centi "${mode}" "${i}" "${role}" "${component}"); then
+				found="true"
+			else
+				centi=0
+			fi
+			obj=$(jq -n \
+				--arg name "${label}" \
+				--arg component "${component}" \
+				--argjson index "${i}" \
+				--arg found "${found}" \
+				--argjson centi "${centi}" \
+				'{
+					name: $name,
+					component: $component,
+					index: $index,
+					found: ($found == "true"),
+					cpu_centi: (if $found == "true" then $centi else null end)
+				}')
+			arr=$(echo "${arr}" | jq -c --argjson n "${obj}" '. + [$n]')
+		done
+	done
+	cpu_processes_json="${arr}"
+	cpu_fetched_at=${now}
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_cpu_json
+# Description: JSON object for the CPU section. Uses caller-scoped cpu_*.
+#              cpu_percent is the raw single-core-baseline reading; percent is
+#              the share of total capacity (all cores).
+# -----------------------------------------------------------------------------
+status_cpu_json() {
+	local count_json="null"
+	if [[ "${cpu_ok}" == "true" ]]; then
+		count_json="${cpu_count}"
+	fi
+
+	jq -n \
+		--argjson cpu_count "${count_json}" \
+		--argjson cpus "${cpu_count:-0}" \
+		--argjson processes "${cpu_processes_json:-[]}" \
+		'{
+			cpu_count: $cpu_count,
+			total_percent: (if $cpu_count == null then null else ($cpu_count * 100) end),
+			processes: ($processes | map({
+				name: .name,
+				component: .component,
+				index: .index,
+				cpu_percent: (if .cpu_centi == null then null else (.cpu_centi / 100) end),
+				percent: (if .cpu_centi == null or $cpus == 0 then null else (((.cpu_centi / $cpus) | round) / 100) end)
+			}))
+		}'
+}
+
+# -----------------------------------------------------------------------------
+# Function: status_print_cpu_footer
+# Description: Human-readable CPU block under Memory.
+#              Example: val-0-bera-reth: 92.3%/800% (11.54%)
+#              (92.3% used of an 800% total = 8 cores, i.e. 11.54% of total)
+# -----------------------------------------------------------------------------
+status_print_cpu_footer() {
+	echo -e "  ${BOLD}CPU:${RESET}"
+
+	local count i name centi pct width tenths cores_pct
+	count=$(echo "${cpu_processes_json}" | jq 'length')
+	width=$(echo "${cpu_processes_json}" | jq '[.[].name | length] | max // 0')
+	[[ "${width}" -lt 1 ]] && width=16
+
+	if [[ "${count}" -eq 0 ]]; then
+		if [[ "${cpu_ok}" != "true" ]]; then
+			echo "    Total CPU:         --"
+		fi
+		echo "    (no processes)"
+		return 0
+	fi
+
+	cores_pct=$((cpu_count * 100))
+	for ((i = 0; i < count; i++)); do
+		name=$(echo "${cpu_processes_json}" | jq -r ".[$i].name")
+		centi=$(echo "${cpu_processes_json}" | jq -r ".[$i].cpu_centi")
+		if [[ "${centi}" == "null" || -z "${centi}" ]]; then
+			printf "    %-*s: --\n" "${width}" "${name}"
+		elif [[ "${cpu_ok}" != "true" ]]; then
+			tenths=$(((centi + 5) / 10))
+			printf "    %-*s: %s.%s%%/--\n" "${width}" "${name}" "$((tenths / 10))" "$((tenths % 10))"
+		else
+			tenths=$(((centi + 5) / 10))
+			pct=$(status_percent "${centi}" "$((cpu_count * 10000))" 2)
+			printf "    %-*s: %s.%s%%/%s%% (%s%%)\n" "${width}" "${name}" "$((tenths / 10))" "$((tenths % 10))" "${cores_pct}" "${pct}"
+		fi
+	done
+}
+
 # -----------------------------------------------------------------------------
 # Function: status_query_one_node
 # Description: Queries EL + CL for a single node and prints a JSON object of
@@ -671,16 +1474,17 @@ status_query_one_node() {
 	local mode="$2"
 	local i="$3"
 
-	local node_moniker node_role
+	local node_moniker node_role snapshot
 	node_moniker=$(echo "${node_json}" | jq -r '.moniker')
 	node_role=$(echo "${node_json}" | jq -r '.role')
+	snapshot=$(snapshot_type_for_role "${node_role}" "${snapshot_override:-}")
 
 	local el_port cl_port
 	el_port=$(echo "${node_json}" | jq -r '.el_ethrpc_port')
 	cl_port=$(echo "${node_json}" | jq -r '.ethrpc_port')
 
-	local role_short="${node_role}"
-	[[ "${node_role}" == "validator" ]] && role_short="val"
+	local role_short
+	role_short=$(status_role_short "${node_role}")
 
 	local el_status="offline"
 	local el_block="--"
@@ -745,6 +1549,7 @@ status_query_one_node() {
 	jq -n \
 		--arg moniker "${node_moniker}" \
 		--arg role "${node_role}" \
+		--arg snapshot "${snapshot}" \
 		--arg el_status "${el_status}" \
 		--arg el_block "${el_block}" \
 		--arg el_peers "${el_peers}" \
@@ -756,6 +1561,7 @@ status_query_one_node() {
 		'{
 			moniker: $moniker,
 			role: $role,
+			snapshot: $snapshot,
 			el_status: $el_status,
 			el_block: $el_block,
 			el_peers: $el_peers,
@@ -793,18 +1599,18 @@ status_collect_nodes_json() {
 # Function: print_status_row
 # Description: Prints a single row of the compact status table (default mode).
 # Arguments:
-#   $1  - node_name     $2  - role           $3  - el_status
-#   $4  - el_block      $5  - live_el_block  $6  - el_peers
-#   $7  - cl_status     $8  - cl_block       $9  - cl_peers
-#   $10 - catching_up   $11 - block_age
+#   $1  - node_name     $2  - role           $3  - snapshot
+#   $4  - el_status     $5  - el_block       $6  - live_el_block
+#   $7  - el_peers      $8  - cl_status      $9  - cl_block
+#   $10 - cl_peers      $11 - catching_up    $12 - block_age
 # -----------------------------------------------------------------------------
 print_status_row() {
 	if [[ "${show_live_el:-false}" == "true" ]]; then
-		printf "  %-28s %-12s %-12s %-12s %-14s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
-			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}"
+		printf "  %-28s %-12s %-10s %-12s %-12s %-14s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}" "${12}"
 	else
-		printf "  %-28s %-12s %-12s %-12s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
-			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
+		printf "  %-28s %-12s %-10s %-12s %-12s %-10s %-12s %-12s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}" "${11}"
 	fi
 }
 
@@ -812,17 +1618,17 @@ print_status_row() {
 # Function: print_verbose_row
 # Description: Prints a single row of the verbose status table.
 # Arguments:
-#   $1 - node_name  $2 - role    $3 - service   $4 - status
-#   $5 - block      $6 - live_block  $7 - peers
-#   $8 - catching_up  $9 - block_age
+#   $1 - node_name  $2 - role     $3 - snapshot  $4 - service
+#   $5 - status     $6 - block    $7 - live_block  $8 - peers
+#   $9 - catching_up  $10 - block_age
 # -----------------------------------------------------------------------------
 print_verbose_row() {
 	if [[ "${show_live_el:-false}" == "true" ]]; then
-		printf "  %-28s %-12s %-14s %-12s %-14s %-14s %-10s %-12s %-14s\n" \
-			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+		printf "  %-28s %-12s %-10s %-14s %-12s %-14s %-14s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10}"
 	else
-		printf "  %-28s %-12s %-14s %-12s %-14s %-10s %-12s %-14s\n" \
-			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+		printf "  %-28s %-12s %-10s %-14s %-12s %-14s %-10s %-12s %-14s\n" \
+			"$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
 	fi
 }
 
@@ -835,12 +1641,14 @@ print_verbose_row() {
 # Arguments (via caller-scoped locals):
 #   config_path, network, moniker, mode, total_nodes, chain_id,
 #   nodes_json, nodes_count, verbose, watch_mode,
-#   live_el_block, live_el_fetched_at, show_live_el
+#   live_el_block, live_el_fetched_at, show_live_el, snapshot_override
 # =============================================================================
 
 render_status_table() {
 	refresh_live_el_block
 	status_refresh_storage
+	status_refresh_memory
+	status_refresh_cpu
 
 	# -------------------------------------------------------------------------
 	# Print header
@@ -857,19 +1665,19 @@ render_status_table() {
 	# -------------------------------------------------------------------------
 	if [[ "${verbose}" == "true" ]]; then
 		if [[ "${show_live_el}" == "true" ]]; then
-			print_verbose_row "NODE" "ROLE" "SERVICE" "STATUS" "BLOCK" "LIVE EL BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
-			echo -e "  ${DIM}$(printf '%.0s─' {1..133})${RESET}"
+			print_verbose_row "NODE" "ROLE" "SNAPSHOT" "SERVICE" "STATUS" "BLOCK" "LIVE EL BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..144})${RESET}"
 		else
-			print_verbose_row "NODE" "ROLE" "SERVICE" "STATUS" "BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
-			echo -e "  ${DIM}$(printf '%.0s─' {1..118})${RESET}"
+			print_verbose_row "NODE" "ROLE" "SNAPSHOT" "SERVICE" "STATUS" "BLOCK" "PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..129})${RESET}"
 		fi
 	else
 		if [[ "${show_live_el}" == "true" ]]; then
-			print_status_row "NODE" "ROLE" "EL STATUS" "EL BLOCK" "LIVE EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
-			echo -e "  ${DIM}$(printf '%.0s─' {1..151})${RESET}"
+			print_status_row "NODE" "ROLE" "SNAPSHOT" "EL STATUS" "EL BLOCK" "LIVE EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..162})${RESET}"
 		else
-			print_status_row "NODE" "ROLE" "EL STATUS" "EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
-			echo -e "  ${DIM}$(printf '%.0s─' {1..136})${RESET}"
+			print_status_row "NODE" "ROLE" "SNAPSHOT" "EL STATUS" "EL BLOCK" "EL PEERS" "CL STATUS" "CL BLOCK" "CL PEERS" "CATCHING UP" "BLOCK AGE"
+			echo -e "  ${DIM}$(printf '%.0s─' {1..147})${RESET}"
 		fi
 	fi
 
@@ -883,9 +1691,10 @@ render_status_table() {
 		local node_obj
 		node_obj=$(echo "${collected}" | jq -c ".[$i]")
 
-		local node_moniker node_role
+		local node_moniker node_role snapshot
 		node_moniker=$(echo "${node_obj}" | jq -r '.moniker')
 		node_role=$(echo "${node_obj}" | jq -r '.role')
+		snapshot=$(echo "${node_obj}" | jq -r '.snapshot')
 
 		local el_status el_block el_peers
 		el_status=$(echo "${node_obj}" | jq -r '.el_status')
@@ -910,12 +1719,12 @@ render_status_table() {
 			el_status_display=$(colorize_status "${el_status}" 12)
 
 			if [[ "${show_live_el}" == "true" ]]; then
-				printf "  %-28s %-12s %-14s %b %-14s %-14s %-10s %-12s %-14s\n" \
-					"${node_moniker}" "${node_role}" "bera-reth" \
+				printf "  %-28s %-12s %-10s %-14s %b %-14s %-14s %-10s %-12s %-14s\n" \
+					"${node_moniker}" "${node_role}" "${snapshot}" "bera-reth" \
 					"${el_status_display}" "${el_block}" "${live_el_block}" "${el_peers}" "--" "--"
 			else
-				printf "  %-28s %-12s %-14s %b %-14s %-10s %-12s %-14s\n" \
-					"${node_moniker}" "${node_role}" "bera-reth" \
+				printf "  %-28s %-12s %-10s %-14s %b %-14s %-10s %-12s %-14s\n" \
+					"${node_moniker}" "${node_role}" "${snapshot}" "bera-reth" \
 					"${el_status_display}" "${el_block}" "${el_peers}" "--" "--"
 			fi
 
@@ -924,13 +1733,13 @@ render_status_table() {
 			catching_display=$(colorize_catching_up "${catching_up}" 12)
 
 			if [[ "${show_live_el}" == "true" ]]; then
-				printf "  %-28s %-12s %-14s %b %-14s %-14s %-10s %b %-14s\n" \
-					"" "" "beacond" \
+				printf "  %-28s %-12s %-10s %-14s %b %-14s %-14s %-10s %b %-14s\n" \
+					"" "" "" "beacond" \
 					"${cl_status_display}" "${cl_block}" "--" "${cl_peers}" \
 					"${catching_display}" "${block_age}"
 			else
-				printf "  %-28s %-12s %-14s %b %-14s %-10s %b %-14s\n" \
-					"" "" "beacond" \
+				printf "  %-28s %-12s %-10s %-14s %b %-14s %-10s %b %-14s\n" \
+					"" "" "" "beacond" \
 					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
 					"${catching_display}" "${block_age}"
 			fi
@@ -938,9 +1747,9 @@ render_status_table() {
 			# Separator between nodes
 			if [[ $((i + 1)) -lt ${nodes_count} ]]; then
 				if [[ "${show_live_el}" == "true" ]]; then
-					echo -e "  ${DIM}$(printf '%.0s·' {1..133})${RESET}"
+					echo -e "  ${DIM}$(printf '%.0s·' {1..144})${RESET}"
 				else
-					echo -e "  ${DIM}$(printf '%.0s·' {1..118})${RESET}"
+					echo -e "  ${DIM}$(printf '%.0s·' {1..129})${RESET}"
 				fi
 			fi
 		else
@@ -955,14 +1764,14 @@ render_status_table() {
 
 			# Print the row — colored fields already include their padding
 			if [[ "${show_live_el}" == "true" ]]; then
-				printf "  %-28s %-12s %b %-12s %-14s %-10s %b %-12s %-10s %b %-14s\n" \
-					"${node_moniker}" "${node_role}" \
+				printf "  %-28s %-12s %-10s %b %-12s %-14s %-10s %b %-12s %-10s %b %-14s\n" \
+					"${node_moniker}" "${node_role}" "${snapshot}" \
 					"${el_status_display}" "${el_block}" "${live_el_block}" "${el_peers}" \
 					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
 					"${catching_display}" "${block_age}"
 			else
-				printf "  %-28s %-12s %b %-12s %-10s %b %-12s %-10s %b %-14s\n" \
-					"${node_moniker}" "${node_role}" \
+				printf "  %-28s %-12s %-10s %b %-12s %-10s %b %-12s %-10s %b %-14s\n" \
+					"${node_moniker}" "${node_role}" "${snapshot}" \
 					"${el_status_display}" "${el_block}" "${el_peers}" \
 					"${cl_status_display}" "${cl_block}" "${cl_peers}" \
 					"${catching_display}" "${block_age}"
@@ -972,6 +1781,10 @@ render_status_table() {
 
 	echo ""
 	status_print_storage_footer
+	echo ""
+	status_print_memory_footer
+	echo ""
+	status_print_cpu_footer
 	echo ""
 }
 
@@ -983,10 +1796,14 @@ render_status_table() {
 render_status_json() {
 	refresh_live_el_block
 	status_refresh_storage
+	status_refresh_memory
+	status_refresh_cpu
 
-	local collected storage_obj live_el_json
+	local collected storage_obj memory_obj cpu_obj live_el_json
 	collected=$(status_collect_nodes_json)
 	storage_obj=$(status_storage_json)
+	memory_obj=$(status_memory_json)
+	cpu_obj=$(status_cpu_json)
 
 	if [[ "${show_live_el}" == "true" && "${live_el_block}" != "--" ]]; then
 		live_el_json="${live_el_block}"
@@ -1002,6 +1819,8 @@ render_status_json() {
 		--argjson total_nodes "${total_nodes}" \
 		--argjson live_el_block "${live_el_json}" \
 		--argjson storage "${storage_obj}" \
+		--argjson memory "${memory_obj}" \
+		--argjson cpu "${cpu_obj}" \
 		--argjson nodes "${collected}" \
 		'{
 			network: $network,
@@ -1011,9 +1830,12 @@ render_status_json() {
 			total_nodes: $total_nodes,
 			live_el_block: $live_el_block,
 			storage: $storage,
+			memory: $memory,
+			cpu: $cpu,
 			nodes: ($nodes | map({
 				moniker: .moniker,
 				role: .role,
+				snapshot_type: .snapshot,
 				el: {
 					status: .el_status,
 					block: (if .el_block == "--" then null else (.el_block | tonumber) end),
@@ -1111,6 +1933,11 @@ cmd_status() {
 	total_nodes=$(jq -r '.total_nodes // 0' "${config_path}") || total_nodes=0
 	chain_id=$(jq -r '.chain_id // "unknown"' "${config_path}") || chain_id="unknown"
 
+	# Configured snapshot type (pruned|archive). Empty on older configs so
+	# snapshot_type_for_role falls back to the role mapping.
+	local snapshot_override
+	snapshot_override=$(jq -r '.snapshot_type // empty' "${config_path}") || snapshot_override=""
+
 	local nodes_json
 	nodes_json=$(jq -c '.nodes // []' "${config_path}") || {
 		log_error "Failed to parse nodes from configuration"
@@ -1140,6 +1967,25 @@ cmd_status() {
 	local storage_nodes_b=0
 	local storage_fetched_at=0
 	local storage_ok="false"
+
+	# Cached process RSS; status_refresh_memory updates these every
+	# MEMORY_REFRESH_SECONDS so --watch does not re-run docker stats / ps
+	# on every table refresh.
+	local memory_total_b=0
+	local memory_ok="false"
+	local memory_fetched_at=0
+	local memory_processes_json="[]"
+	local memory_docker_stats=""
+	local memory_docker_ps=""
+
+	# Cached per-binary CPU usage; status_refresh_cpu updates these every
+	# CPU_REFRESH_SECONDS so --watch does not re-run docker stats / ps on
+	# every table refresh.
+	local cpu_count=0
+	local cpu_ok="false"
+	local cpu_fetched_at=0
+	local cpu_processes_json="[]"
+	local cpu_docker_stats=""
 
 	# -------------------------------------------------------------------------
 	# [STEP 3] Render — JSON, once, or in a watch loop
@@ -1172,9 +2018,9 @@ cmd_status() {
 			local now_ts
 			now_ts=$(date '+%H:%M:%S')
 			if [[ "${show_live_el}" == "true" ]]; then
-				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  LIVE EL BLOCK every ${LIVE_EL_REFRESH_SECONDS}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  LIVE EL BLOCK every ${LIVE_EL_REFRESH_SECONDS}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Memory every ${MEMORY_REFRESH_SECONDS}s  |  CPU every ${CPU_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
 			else
-				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
+				echo -e "  ${DIM}Last updated: ${now_ts}  |  Refreshing every ${interval}s  |  Storage every ${STORAGE_REFRESH_SECONDS}s  |  Memory every ${MEMORY_REFRESH_SECONDS}s  |  CPU every ${CPU_REFRESH_SECONDS}s  |  Press Ctrl+C to exit${RESET}"
 			fi
 			echo ""
 

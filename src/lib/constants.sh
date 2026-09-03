@@ -72,7 +72,7 @@ set -euo pipefail
 # Management: Edit this value when releasing, then run ./build.sh
 #
 # Example: "0.9.0"
-BERANODE_VERSION="0.11.0"
+BERANODE_VERSION="0.12.0"
 
 # =============================================================================
 # [2] PLATFORM DETECTION
@@ -188,6 +188,15 @@ readonly LIVE_EL_REFRESH_SECONDS=10
 # How often `beranode status --watch` re-runs diskutil/df and `du` for the
 # Storage footer (directory walk can be slow on large chaindata).
 readonly STORAGE_REFRESH_SECONDS=30
+
+# How often `beranode status --watch` re-queries process RSS / docker stats
+# for the Memory footer. Cheaper than `du`, but docker stats still takes ~1s.
+readonly MEMORY_REFRESH_SECONDS=5
+
+# How often `beranode status --watch` re-queries per-binary CPU usage
+# (ps %cpu on local/serviceman, docker stats CPUPerc on docker) for the CPU
+# footer. Same cadence as Memory; docker stats still takes ~1s.
+readonly CPU_REFRESH_SECONDS=5
 
 # Official seed-data (genesis, KZG, EL bootnodes/peers, toml overlays).
 readonly SEED_DATA_BASE_URL="https://raw.githubusercontent.com/berachain/beacon-kit/refs/heads/main/testing/networks"
@@ -422,22 +431,39 @@ readonly BERANODES_PATH_RUNS="/runs"
 # Variable: BERANODES_PATH_SNAPSHOTS
 # Description: Official chain-state snapshot download directory
 # Value: "/snapshots"
-# Contents: .tar.lz4 archives plus unzipped beacond/ and reth/ trees
+# Contents: Per-network subdirs (bepolia/, mainnet/) with .tar.lz4 archives
+#           plus unzipped beacond/ and reth/ trees
 readonly BERANODES_PATH_SNAPSHOTS="/snapshots"
 
 # Variable: BERANODES_PATH_SERVICES
-# Description: OS service-manager artifacts (launchd plists, manifest)
+# Description: OS service-manager artifacts (unit files / plists, runner, manifest)
 # Value: "/services"
-# Contents: Copied LaunchAgent plists and launchd.json manifest
+# Contents: launchd plists + launchd.json (macOS) or systemd units + systemd.json (Linux)
 readonly BERANODES_PATH_SERVICES="/services"
 
 # Variable: SERVICEMAN_LAUNCHD_LABEL_PREFIX
-# Description: Reverse-DNS prefix for launchd job labels
+# Description: Reverse-DNS prefix for launchd job labels and systemd unit names
 readonly SERVICEMAN_LAUNCHD_LABEL_PREFIX="com.berachain.beranode"
 
 # Variable: SERVICEMAN_LAUNCHD_THROTTLE_INTERVAL
 # Description: Seconds launchd waits before restarting a crashed job
 readonly SERVICEMAN_LAUNCHD_THROTTLE_INTERVAL=10
+
+# Variable: SERVICEMAN_SYSTEMD_RESTART_SEC
+# Description: Seconds systemd waits before Restart=always (KeepAlive equivalent)
+readonly SERVICEMAN_SYSTEMD_RESTART_SEC=10
+
+# Variable: SERVICEMAN_SYSTEMD_TIMEOUT_STOP_SEC
+# Description: Seconds systemd waits for a clean stop before SIGKILL
+readonly SERVICEMAN_SYSTEMD_TIMEOUT_STOP_SEC=60
+
+# Variable: SERVICEMAN_SYSTEMD_LIMIT_NOFILE
+# Description: Soft/hard NOFILE rlimit for user units (CL/EL open many sockets)
+readonly SERVICEMAN_SYSTEMD_LIMIT_NOFILE=1048576
+
+# Variable: SERVICEMAN_SYSTEMD_RUNNER_NAME
+# Description: Shared tee runner that mirrors stdout/stderr to beranodes/logs and journald
+readonly SERVICEMAN_SYSTEMD_RUNNER_NAME="beranode-tee-journal.sh"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File Names

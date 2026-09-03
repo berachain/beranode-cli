@@ -1,3 +1,4 @@
 beranodes
 .DS_Store
 debug_container.*
+.tmp-test-*
