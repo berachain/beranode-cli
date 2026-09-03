@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- GitHub Release workflow pins `actions/checkout` to a full-length commit SHA so the `vX.Y.Z` tag job can run under repository action rules
+
 ### Security
 
 ## [0.11.0] - 2026-09-02
