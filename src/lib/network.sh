@@ -114,6 +114,8 @@ network_seed_genesis_md5() {
 }
 
 # Role → snapshot type. Override (pruned|archive) wins for every role.
+# Default is pruned. Legacy rpc-full / full_node roles still map to archive
+# when no override is set, so existing configs keep their previous behavior.
 snapshot_type_for_role() {
 	local role="${1:-}"
 	local override="${2:-}"
@@ -350,7 +352,7 @@ detect_external_ip() {
 	echo "$ip"
 }
 
-# True when bera-reth should run with --full (pruned). Archive/rpc-full omit --full.
+# True when bera-reth should run with --full (pruned). Archive omits --full.
 reth_uses_pruning() {
 	local role="${1:-}"
 	local override="${2:-}"

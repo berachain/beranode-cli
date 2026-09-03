@@ -2,7 +2,7 @@
 # Command Dispatcher - Core Routing Module
 # =============================================================================
 #
-# VERSION: v0.11.0 (Current)
+# VERSION: v0.12.0 (Current)
 #
 # PURPOSE:
 #   This module serves as the central command router for the beranode CLI,
@@ -27,7 +27,7 @@
 #
 #   [3] COMMAND ROUTING TABLE
 #       - Help/Version flags       : -h, --help, -v, --version
-#       - Active commands          : init, start, stop, status, validate
+#       - Active commands          : init, start, stop, status, snapshot, validate, deps
 #       - Placeholder commands     : restart, logs, config, update
 #
 # =============================================================================
@@ -59,6 +59,7 @@ COMMANDS:
     status      Display live status of all Berachain nodes
     snapshot    Download and restore official chain-state snapshots
     validate    Validate beranodes configuration file
+    deps        Check and install host dependencies
     help        Show this help message
     version     Show version information
 
@@ -67,8 +68,11 @@ OPTIONS:
     -v, --version  Show version information
 
 EXAMPLES:
-    beranode init --network bepolia --validators 1
-    beranode init --network bepolia --pruned-nodes 1 --serviceman
+    beranode init --network bepolia --vals 1
+    beranode init --network bepolia --rpcs 1 --serviceman
+    beranode init --network bepolia --rpcs 1 --force
+    beranode init --network bepolia --rpcs 1 --snapshot-type=archive
+    beranode deps
     beranode snapshot download --network bepolia
     beranode start
     beranode status
@@ -202,6 +206,11 @@ main() {
 		# Download / restore official chain-state snapshots
 		# Handler: cmd_snapshot() in src/commands/snapshot.sh
 		cmd_snapshot "$@"
+		;;
+	deps)
+		# Check / install host dependencies (curl, jq, foundry, rust, ...)
+		# Handler: cmd_deps() in src/commands/deps.sh
+		cmd_deps "$@"
 		;;
 
 	# ---------------------------------------------------------------------

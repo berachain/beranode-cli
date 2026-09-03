@@ -195,20 +195,22 @@ modules=(
 	"lib/argparse.sh"      # [4.5] Argument parsing utilities (NEW)
 	"lib/config.sh"        # [4.6] Configuration loading utilities (NEW)
 	"lib/utils.sh"         # [4.7] General utility functions
-	"lib/validation.sh"    # [4.8] Configuration validation utilities
-	"lib/genesis.sh"       # [4.9] Genesis file generation
-	"lib/download.sh"      # [4.10] Download utilities
-	"lib/network.sh"       # [4.11] Public-network mapping helpers
-	"lib/snapshots.sh"     # [4.12] Official snapshot download/restore
-	"lib/serviceman.sh"    # [4.13] OS service manager (launchd)
-	"commands/common.sh"   # [4.14] Common command utilities
-	"commands/init.sh"     # [4.15] Init command implementation
-	"commands/start.sh"    # [4.16] Start command implementation
-	"commands/stop.sh"     # [4.17] Stop command implementation
-	"commands/status.sh"   # [4.18] Status command implementation
-	"commands/validate.sh" # [4.19] Validate command implementation
-	"commands/snapshot.sh" # [4.20] Snapshot download/restore command
-	"core/dispatcher.sh"   # [4.21] Main dispatcher and entry point
+	"lib/deps.sh"          # [4.8] Host dependency detection / install
+	"lib/validation.sh"    # [4.9] Configuration validation utilities
+	"lib/genesis.sh"       # [4.10] Genesis file generation
+	"lib/download.sh"      # [4.11] Download utilities
+	"lib/network.sh"       # [4.12] Public-network mapping helpers
+	"lib/snapshots.sh"     # [4.13] Official snapshot download/restore
+	"lib/serviceman.sh"    # [4.14] OS service manager (launchd / systemd)
+	"commands/common.sh"   # [4.15] Common command utilities
+	"commands/init.sh"     # [4.16] Init command implementation
+	"commands/start.sh"    # [4.17] Start command implementation
+	"commands/stop.sh"     # [4.18] Stop command implementation
+	"commands/status.sh"   # [4.19] Status command implementation
+	"commands/validate.sh" # [4.20] Validate command implementation
+	"commands/snapshot.sh" # [4.21] Snapshot download/restore command
+	"commands/deps.sh"     # [4.22] Host dependency check / install
+	"core/dispatcher.sh"   # [4.23] Main dispatcher and entry point
 )
 
 # Process each module

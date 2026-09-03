@@ -5,9 +5,9 @@ set -euo pipefail
 # =============================================================================
 # File: src/commands/init.sh
 # Version: Compatible with Beranode CLI v0.9.0
-# Description: Initializes Berachain node configurations including validator,
-#              full nodes, and pruned nodes with comprehensive configuration
-#              management for client.toml, app.toml, and config.toml files.
+# Description: Initializes Berachain node configurations including validator
+#              and RPC nodes with comprehensive configuration management for
+#              client.toml, app.toml, and config.toml files.
 #
 # =============================================================================
 # NUMBERED LEGEND - EXECUTION FLOW
@@ -30,13 +30,14 @@ set -euo pipefail
 #     └─ Validate network selection (devnet/bepolia/mainnet)
 #
 # [4] CONFIGURATION VALIDATION
-#     └─ Validate node counts (validators, full nodes, pruned nodes)
+#     └─ Validate node counts (validators, RPC nodes)
 #     └─ Apply network-specific defaults
 #     └─ Display configuration summary
 #
 # [5] DIRECTORY STRUCTURE SETUP
 #     └─ Create beranodes directory structure
-#     └─ Preserve snapshots/ if re-initializing an existing directory
+#     └─ Wipe an existing tree (--force/--yes/-y, or confirm prompt)
+#     └─ Preserve snapshots/ on prompted re-init; --force deletes them too
 #     └─ Ensure bin/, tmp/, log/, nodes/, snapshots/ directories exist
 #
 # [6] BINARY VERIFICATION
@@ -51,7 +52,7 @@ set -euo pipefail
 # [8] CONFIGURATION FILE GENERATION
 #     └─ Create beranodes.config.json with all settings
 #     └─ Prompt for overwrite if config already exists
-#     └─ Generate node configurations (validators, full nodes, pruned nodes)
+#     └─ Generate node configurations (validators, RPC nodes)
 #
 # [9] GENESIS FILE SETUP
 #     └─ Download kzg-trusted-setup.json if needed
@@ -100,15 +101,16 @@ GENERAL OPTIONS:
     --beranodes-dir <path>           Directory for beranodes data (default: ./beranodes)
     --moniker <name>                Custom name for your node
     --network <network>             Network to connect to: devnet, bepolia, mainnet (default: devnet)
-    --validators <count>            Number of validator nodes (default: 1)
-    --full-nodes <count>            Number of full nodes (default: 0)
-    --pruned-nodes <count>          Number of pruned nodes (default: 0)
+    --validators|--vals <count>     Number of validator nodes (default: 1)
+    --rpcs <count>                  Number of RPC nodes (default: 0)
     --skip-snapshot                 Skip official snapshot download (public networks only)
-    --snapshot-type <pruned|archive> Force one snapshot type for every node (default: role-mapped)
+    --snapshot-type <pruned|archive> Snapshot type for every node (default: pruned)
+    --force|--yes|-y                Wipe an existing beranodes directory and re-initialize
+                                    without prompting (includes snapshots/)
     --mode <local|docker|serviceman> Process runtime (default: local)
     --docker                        Enable Docker mode (alias for --mode docker)
     --serviceman                    Enable serviceman mode (alias for --mode serviceman).
-                                    macOS: launchd user LaunchAgents; start/stop manage the service
+                                    macOS: launchd user LaunchAgents; Linux: systemd user units + journald
     --wallet-private-key <key>      Private key for the wallet
     --wallet-address <address>      Wallet address
     --wallet-balance <amount>       Initial wallet balance
@@ -318,8 +320,10 @@ CONFIG.TOML OPTIONS:
 
 EXAMPLES:
     beranode init --network devnet --validators 1
-    beranode init --moniker mynode --validators 2 --full-nodes 1
+    beranode init --moniker mynode --vals 2 --rpcs 1
     beranode init --network bepolia --validators 1 --wallet-balance 5000000000000000000000000000
+    beranode init --network bepolia --rpcs 1 --force
+    beranode init --network bepolia --rpcs 1 --snapshot-type=archive
 
 For more information, visit: https://github.com/berachain/beranode-cli2
 EOF
@@ -355,6 +359,88 @@ init_require_docker() {
 	fi
 }
 
+# Wipe an existing beranodes directory so init can start fresh.
+# $1 beranodes path  $2 force (true skips the confirmation prompt and also
+#    deletes snapshots/; prompted re-init still preserves snapshots/)
+# Returns 0 to continue init, 1 if the user declined (tree unchanged).
+init_reinit_existing_beranodes() {
+	local beranodes_path="$1"
+	local force="${2:-false}"
+
+	if [[ ! -d "${beranodes_path}" ]]; then
+		return 0
+	fi
+
+	local snapshots_dir="${beranodes_path}${BERANODES_PATH_SNAPSHOTS}"
+	local preserve_snapshots=false
+	if [[ "${force}" != true && -d "${snapshots_dir}" ]]; then
+		preserve_snapshots=true
+	fi
+
+	log_warn "Beranodes directory already exists: ${beranodes_path}"
+	echo ""
+	echo -e "${YELLOW}An existing beranodes directory was found.${RESET}"
+	echo -e "${YELLOW}Re-initializing will remove the current directory and create a fresh one.${RESET}"
+	echo -e "${YELLOW}This will delete all existing node data, binaries, and configuration.${RESET}"
+	if [[ "${force}" == true ]]; then
+		echo -e "${YELLOW}The snapshots directory will also be deleted.${RESET}"
+	elif [[ "${preserve_snapshots}" == true ]]; then
+		echo -e "${YELLOW}The snapshots directory will be preserved.${RESET}"
+	fi
+	echo ""
+
+	local confirm_override=""
+	if [[ "${force}" == true ]]; then
+		log_info "Removing existing beranodes directory including snapshots (--force)"
+		confirm_override="y"
+	else
+		read -p "Do you want to remove and re-initialize? (y/n): " confirm_override || true
+	fi
+
+	case "$confirm_override" in
+	y | Y | yes | Yes | YES)
+		# Unload leftover launchd/systemd jobs before deleting the tree so they
+		# do not keep running against a wiped data dir.
+		if declare -f serviceman_stop_all >/dev/null; then
+			serviceman_stop_all "${beranodes_path}" || true
+		fi
+		if [[ "${preserve_snapshots}" == true ]]; then
+			log_info "Removing existing beranodes directory (preserving snapshots): ${beranodes_path}"
+			local entry name snapshots_name
+			snapshots_name="$(basename "${BERANODES_PATH_SNAPSHOTS}")"
+			local nullglob_was_set=0
+			local dotglob_was_set=0
+			if shopt -q nullglob; then
+				nullglob_was_set=1
+			fi
+			if shopt -q dotglob; then
+				dotglob_was_set=1
+			fi
+			shopt -s nullglob dotglob
+			for entry in "${beranodes_path}"/*; do
+				name="$(basename "${entry}")"
+				if [[ "${name}" == "${snapshots_name}" || "${name}" == "." || "${name}" == ".." ]]; then
+					continue
+				fi
+				rm -rf "${entry}"
+			done
+			[[ "${nullglob_was_set}" -eq 1 ]] || shopt -u nullglob
+			[[ "${dotglob_was_set}" -eq 1 ]] || shopt -u dotglob
+			log_success "Existing directory removed. Snapshots preserved at ${snapshots_dir}"
+		else
+			log_info "Removing existing beranodes directory: ${beranodes_path}"
+			rm -rf "${beranodes_path}"
+			log_success "Existing directory removed."
+		fi
+		return 0
+		;;
+	*)
+		log_warn "Initialization aborted by user."
+		return 1
+		;;
+	esac
+}
+
 # $1 requested mode  $2 previously chosen mode (empty if none)
 init_apply_mode() {
 	local requested="$1"
@@ -370,7 +456,7 @@ init_apply_mode() {
 		init_require_docker
 		;;
 	serviceman)
-		serviceman_require_launchd || exit 1
+		serviceman_require || exit 1
 		;;
 	*)
 		log_error "Unknown mode: ${requested}. Supported: local, docker, serviceman"
@@ -404,6 +490,7 @@ cmd_init() {
 	check_cast_version
 	if [[ $? -ne 0 ]]; then
 		log_error "Cast version is not supported. Please upgrade to version $SUPPORTED_CAST_VERSION or higher."
+		log_info "Run 'beranode deps' to detect and install Foundry and other host tools."
 		return 1
 	fi
 	log_success "Cast version is supported."
@@ -438,11 +525,10 @@ cmd_init() {
 	local force=false
 	local skip_genesis=false
 	local skip_snapshot=false
-	local snapshot_type=""
+	local snapshot_type="pruned"
 	local total_nodes=0
 	local validators=0
-	local full_nodes=0
-	local pruned_nodes=0
+	local rpcs=0
 	local docker_mode=false
 	local docker_tag_beacond="latest"
 	local docker_tag_berareth="latest"
@@ -671,6 +757,9 @@ cmd_init() {
 	# Parse all command-line arguments and override default values
 
 	while [[ $# -gt 0 ]]; do
+		if split=$(split_equals_flag "$1"); then
+			set -- "${split%%$'\t'*}" "${split#*$'\t'}" "${@:2}"
+		fi
 		case "$1" in
 		--beacond-version)
 			if [[ -n "$2" ]]; then
@@ -783,7 +872,7 @@ cmd_init() {
 				shift
 			fi
 			;;
-		--validators)
+		--validators | --vals)
 			if [[ -n "$2" ]]; then
 				validators="$2"
 				shift 2
@@ -791,25 +880,22 @@ cmd_init() {
 				shift
 			fi
 			;;
-		--full-nodes)
+		--rpcs)
 			if [[ -n "$2" ]]; then
-				full_nodes="$2"
+				rpcs="$2"
 				shift 2
 			else
-				log_warn "--full-nodes is not set. defaulting to 0"
-				full_nodes=0
-			fi
-			;;
-		--pruned-nodes)
-			if [[ -n "$2" ]]; then
-				pruned_nodes="$2"
-				shift 2
-			else
+				log_warn "--rpcs is not set. defaulting to 0"
+				rpcs=0
 				shift
 			fi
 			;;
 		--skip-snapshot)
 			skip_snapshot=true
+			shift
+			;;
+		--force | --yes | -y)
+			force=true
 			shift
 			;;
 		--snapshot-type)
@@ -2329,12 +2415,12 @@ cmd_init() {
 		validators=1
 	fi
 
-	total_nodes=$(((${validators:-1} + ${full_nodes:-0} + ${pruned_nodes:-0})))
+	total_nodes=$(((${validators:-1} + ${rpcs:-0})))
 	# devnet defaults
 	if [[ "${network}" == "${CHAIN_NAME_DEVNET}" ]]; then
 		if [[ ${total_nodes} -eq 0 ]]; then
-			total_nodes=$(((${validators} + ${full_nodes} + ${pruned_nodes})))
-			log_warn "total nodes is 0. defaulting to ${validators} validator, ${full_nodes} rpc full node, and ${pruned_nodes} rpc pruned node"
+			total_nodes=$(((${validators} + ${rpcs})))
+			log_warn "total nodes is 0. defaulting to ${validators} validator and ${rpcs} rpc node"
 		fi
 	fi
 	# public network (bepolia / mainnet) defaults
@@ -2350,12 +2436,12 @@ cmd_init() {
 			log_info "Using recommended bera-reth version for ${network}: ${berareth_version}"
 		fi
 		# RPC nodes on public networks are not validators.
-		if [[ "${full_nodes:-0}" -gt 0 || "${pruned_nodes:-0}" -gt 0 ]]; then
+		if [[ "${rpcs:-0}" -gt 0 ]]; then
 			if [[ "${validators:-0}" -gt 0 ]]; then
-				log_warn "Public network ${network} with --full-nodes/--pruned-nodes: setting validators to 0 (was ${validators})."
+				log_warn "Public network ${network} with --rpcs: setting validators to 0 (was ${validators})."
 			fi
 			validators=0
-			total_nodes=$(((${validators:-0} + ${full_nodes:-0} + ${pruned_nodes:-0})))
+			total_nodes=$(((${validators:-0} + ${rpcs:-0})))
 		fi
 		if [[ "${validators}" -gt 0 ]]; then
 			log_warn "Validator nodes on ${network} receive keys (priv_validator_key.json) but are NOT in the public validator set."
@@ -2368,17 +2454,16 @@ cmd_init() {
 	echo "Moniker:         ${moniker:-<unset>}"
 	echo "Network:         ${network:-<unset>}"
 	echo "Validators:      ${validators}"
-	echo "Full Nodes:      ${full_nodes}"
-	echo "Pruned Nodes:    ${pruned_nodes}"
+	echo "RPC Nodes:       ${rpcs}"
 	echo "Total Nodes:     $total_nodes"
 	echo "Beranode Dir:    ${BERANODES_PATH:-<unset>}"
 	echo "Skip Genesis:    ${skip_genesis:-false}"
 	echo "Skip Snapshot:   ${skip_snapshot:-false}"
-	echo "Snapshot Type:   ${snapshot_type:-role-mapped}"
+	echo "Snapshot Type:   ${snapshot_type}"
 	echo "Force:           ${force:-false}"
 	echo "Mode:            ${mode}"
 	if [[ "${mode}" == "serviceman" ]]; then
-		echo "Service manager: launchd (user LaunchAgents)"
+		echo "Service manager: $(serviceman_backend_description)"
 		echo "                 beranode start/stop load and unload the service"
 	fi
 	echo "=========================================="
@@ -2388,47 +2473,9 @@ cmd_init() {
 	# [5] DIRECTORY STRUCTURE SETUP
 	# =========================================================================
 	# Check if beranodes directory already exists and prompt for override
-	if [[ -d "${BERANODES_PATH}" ]]; then
-		local snapshots_dir="${BERANODES_PATH}${BERANODES_PATH_SNAPSHOTS}"
-		local preserve_snapshots=false
-		if [[ -d "${snapshots_dir}" ]]; then
-			preserve_snapshots=true
-		fi
-
-		log_warn "Beranodes directory already exists: ${BERANODES_PATH}"
-		echo ""
-		echo -e "${YELLOW}An existing beranodes directory was found.${RESET}"
-		echo -e "${YELLOW}Re-initializing will remove the current directory and create a fresh one.${RESET}"
-		echo -e "${YELLOW}This will delete all existing node data, binaries, and configuration.${RESET}"
-		if [[ "${preserve_snapshots}" == true ]]; then
-			echo -e "${YELLOW}The snapshots directory will be preserved.${RESET}"
-		fi
-		echo ""
-		read -p "Do you want to remove and re-initialize? (y/n): " confirm_override
-		case "$confirm_override" in
-		y | Y | yes | Yes | YES)
-			# Unload launchd jobs before deleting the tree so leftover LaunchAgents
-			# do not keep running against a wiped data dir.
-			if [[ "${IS_MACOS}" == "true" ]] && command -v launchctl >/dev/null 2>&1; then
-				serviceman_stop_all "${BERANODES_PATH}" || true
-			fi
-			if [[ "${preserve_snapshots}" == true ]]; then
-				log_info "Removing existing beranodes directory (preserving snapshots): ${BERANODES_PATH}"
-				find "${BERANODES_PATH}" -mindepth 1 -maxdepth 1 \
-					! -name "$(basename "${BERANODES_PATH_SNAPSHOTS}")" \
-					-exec rm -rf {} +
-				log_success "Existing directory removed. Snapshots preserved at ${snapshots_dir}"
-			else
-				log_info "Removing existing beranodes directory: ${BERANODES_PATH}"
-				rm -rf "${BERANODES_PATH}"
-				log_success "Existing directory removed."
-			fi
-			;;
-		*)
-			log_warn "Initialization aborted by user."
-			return 0
-			;;
-		esac
+	# (--force/--yes/-y skips the prompt and wipes for a fresh start)
+	if ! init_reinit_existing_beranodes "${BERANODES_PATH}" "${force}"; then
+		return 0
 	fi
 
 	# Create all required beranodes directory structure
@@ -2672,29 +2719,35 @@ cmd_init() {
 	# Check if the configuration file already exists, and don't overwrite it
 	local_config_exists=false
 	if [[ -f "${config_json_path}" ]]; then
-		log_warn "Configuration already exists at ${config_json_path}. Will not overwrite."
-		local_config_exists=true
-		# Prompt the user to overwrite or use the existing config
-		while true; do
-			echo -e "${YELLOW}A configuration file already exists at ${config_json_path}.${RESET}"
-			read -p "Do you want to overwrite it? [y/n]: " yn
-			case "$yn" in
-			[Yy]*)
-				log_warn "Overwriting existing configuration file at ${config_json_path}."
-				rm -f "${config_json_path}"
-				log_info "Previous configuration file removed."
-				local_config_exists=false
-				break
-				;;
-			[Nn]* | "")
-				log_success "Using existing configuration file at ${config_json_path}."
-				break
-				;;
-			*)
-				echo "Please answer yes (y) or no (n)."
-				;;
-			esac
-		done
+		if [[ "${force}" == true ]]; then
+			log_warn "Overwriting existing configuration file at ${config_json_path} (--force)."
+			rm -f "${config_json_path}"
+			log_info "Previous configuration file removed."
+		else
+			log_warn "Configuration already exists at ${config_json_path}. Will not overwrite."
+			local_config_exists=true
+			# Prompt the user to overwrite or use the existing config
+			while true; do
+				echo -e "${YELLOW}A configuration file already exists at ${config_json_path}.${RESET}"
+				read -p "Do you want to overwrite it? [y/n]: " yn
+				case "$yn" in
+				[Yy]*)
+					log_warn "Overwriting existing configuration file at ${config_json_path}."
+					rm -f "${config_json_path}"
+					log_info "Previous configuration file removed."
+					local_config_exists=false
+					break
+					;;
+				[Nn]* | "")
+					log_success "Using existing configuration file at ${config_json_path}."
+					break
+					;;
+				*)
+					echo "Please answer yes (y) or no (n)."
+					;;
+				esac
+			done
+		fi
 	fi
 
 	# Create all new setup
@@ -2786,72 +2839,13 @@ cmd_init() {
 			done
 		fi
 
-		nodes_full_nodes=""
-		if [[ ${full_nodes} -gt 0 ]]; then
-			for i in $(seq 1 ${full_nodes}); do
-				if [[ $i -eq ${full_nodes} ]]; then
-					nodes_full_nodes="${nodes_full_nodes}{
-						\"role\": \"rpc-full\",
-						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
-						\"network\": \"${network}\",
-						\"wallet_address\": \"${wallet_address}\",
-						\"ethrpc_port\": ${current_node_ethrpc_port},
-						\"ethp2p_port\": ${current_node_ethp2p_port},
-						\"ethproxy_port\": ${current_node_ethproxy_port},
-						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
-            \"el_ws_port\": ${current_node_el_ws_port},
-						\"el_authrpc_port\": ${current_node_el_authrpc_port},
-						\"el_eth_port\": ${current_node_el_eth_port},
-						\"el_prometheus_port\": ${current_node_el_prometheus_port},
-						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port},
-            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
-            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
-					}"
-				else
-					nodes_full_nodes="${nodes_full_nodes}{
-						\"role\": \"rpc-full\",
-						\"moniker\": \"${moniker}-rpc-full-$(($i - 1))\",
-						\"network\": \"${network}\",
-						\"wallet_address\": \"${wallet_address}\",
-						\"ethrpc_port\": ${current_node_ethrpc_port},
-						\"ethp2p_port\": ${current_node_ethp2p_port},
-						\"ethproxy_port\": ${current_node_ethproxy_port},
-						\"el_ethrpc_port\": ${current_node_el_ethrpc_port},
-            \"el_ws_port\": ${current_node_el_ws_port},
-						\"el_authrpc_port\": ${current_node_el_authrpc_port},
-						\"el_eth_port\": ${current_node_el_eth_port},
-						\"el_prometheus_port\": ${current_node_el_prometheus_port},
-						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port},
-            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
-            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
-					},"
-				fi
-
-				# Increment ports for each node (both local and Docker modes need unique host ports)
-				current_node_ethrpc_port=$((current_node_ethrpc_port + 10000))
-				current_node_ethp2p_port=$((current_node_ethp2p_port + 10000))
-				current_node_ethproxy_port=$((current_node_ethproxy_port + 10000))
-				current_node_el_ethrpc_port=$((current_node_el_ethrpc_port + node_port_increment))
-				current_node_el_ws_port=$((current_node_el_ws_port + node_port_increment))
-				current_node_el_authrpc_port=$((current_node_el_authrpc_port + 100))
-				current_node_el_eth_port=$((current_node_el_eth_port + node_port_increment))
-				current_node_el_prometheus_port=$((current_node_el_prometheus_port + node_port_increment))
-				current_node_cl_prometheus_port=$((current_node_cl_prometheus_port + 10000))
-				current_node_beacond_node_port=$((current_node_beacond_node_port + 100))
-				current_node_configtoml_grpc_laddr=$((current_node_configtoml_grpc_laddr + 100))
-				current_node_configtoml_grpc_privileged_laddr=$((current_node_configtoml_grpc_privileged_laddr + 100))
-			done
-		fi
-
-		nodes_pruned_nodes=""
-		if [[ ${pruned_nodes} -gt 0 ]]; then
-			for i in $(seq 1 ${pruned_nodes}); do
-				if [[ $i -eq ${pruned_nodes} ]]; then
-					nodes_pruned_nodes="${nodes_pruned_nodes}{
-						\"role\": \"rpc-pruned\",
-						\"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\",
+		nodes_rpcs=""
+		if [[ ${rpcs} -gt 0 ]]; then
+			for i in $(seq 1 ${rpcs}); do
+				if [[ $i -eq ${rpcs} ]]; then
+					nodes_rpcs="${nodes_rpcs}{
+						\"role\": \"rpc\",
+						\"moniker\": \"${moniker}-rpc-$(($i - 1))\",
 						\"network\": \"${network}\",
 						\"wallet_address\": \"${wallet_address}\",
 						\"ethrpc_port\": ${current_node_ethrpc_port},
@@ -2863,14 +2857,14 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port},
-            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
-            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
+						\"beacond_node_port\": ${current_node_beacond_node_port},
+						\"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+						\"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					}"
 				else
-					nodes_pruned_nodes="${nodes_pruned_nodes}{
-						\"role\": \"rpc-pruned\",
-						\"moniker\": \"${moniker}-rpc-pruned-$(($i - 1))\",
+					nodes_rpcs="${nodes_rpcs}{
+						\"role\": \"rpc\",
+						\"moniker\": \"${moniker}-rpc-$(($i - 1))\",
 						\"network\": \"${network}\",
 						\"wallet_address\": \"${wallet_address}\",
 						\"ethrpc_port\": ${current_node_ethrpc_port},
@@ -2882,9 +2876,9 @@ cmd_init() {
 						\"el_eth_port\": ${current_node_el_eth_port},
 						\"el_prometheus_port\": ${current_node_el_prometheus_port},
 						\"cl_prometheus_port\": ${current_node_cl_prometheus_port},
-            \"beacond_node_port\": ${current_node_beacond_node_port},
-            \"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
-            \"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
+						\"beacond_node_port\": ${current_node_beacond_node_port},
+						\"configtoml_grpc_laddr\": ${current_node_configtoml_grpc_laddr},
+						\"configtoml_grpc_privileged_laddr\": ${current_node_configtoml_grpc_privileged_laddr}
 					},"
 				fi
 
@@ -2908,7 +2902,7 @@ cmd_init() {
 		nodes_combined=""
 
 		# Prepare a list of all potential node groups. Add new ones here if needed.
-		all_groups=("$nodes_validators" "$nodes_full_nodes" "$nodes_pruned_nodes")
+		all_groups=("$nodes_validators" "$nodes_rpcs")
 		for group in "${all_groups[@]}"; do
 			if [[ -n "$group" ]]; then
 				if [[ -z "$nodes_combined" ]]; then
@@ -3091,8 +3085,7 @@ cmd_init() {
 			--arg moniker "$moniker" \
 			--arg network "$network" \
 			--argjson validators "$validators" \
-			--argjson full_nodes "$full_nodes" \
-			--argjson pruned_nodes "$pruned_nodes" \
+			--argjson rpcs "$rpcs" \
 			--argjson total_nodes "$total_nodes" \
 			--arg beranode_dir "$BERANODES_PATH" \
 			--argjson skip_genesis "$skip_genesis" \
@@ -3112,8 +3105,7 @@ cmd_init() {
             moniker: $moniker,
             network: $network,
             validators: $validators,
-            full_nodes: $full_nodes,
-            pruned_nodes: $pruned_nodes,
+            rpcs: $rpcs,
             total_nodes: $total_nodes,
             beranode_dir: $beranode_dir,
             skip_genesis: $skip_genesis,

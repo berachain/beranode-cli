@@ -15,12 +15,15 @@ A command-line tool for managing Berachain nodes.
 ## Prerequisites
 
 - Bash shell
-- Cast CLI version 1.4.3 or higher - https://getfoundry.sh
-- `curl`, `tar`
-- `lz4` — required to extract official chain-state snapshots (`brew install lz4` or `apt-get install lz4`)
+- Cast CLI version 1.6.0 or higher - https://getfoundry.sh
+- `curl`, `wget`, `tar`, `gzip`, `jq`
+- `lz4` — required to extract official chain-state snapshots
+- Rust (`rustc`) — used when building clients from source
 - Required Berachain binaries (downloaded by `init` if missing):
   - `beacond` (BeaconKit consensus client)
   - `bera-reth` (Reth execution client)
+
+Run `beranode deps` to detect the OS/package manager, log installed versions, and optionally install anything missing (Homebrew on macOS; apt, apk, dnf, yum, pacman, or zypper on Linux).
 
 ## Installation
 
@@ -29,11 +32,25 @@ A command-line tool for managing Berachain nodes.
    ```bash
    chmod +x beranode
    ```
-3. Optionally, add to your PATH or create a symlink
+3. Install host dependencies (prompts before installing anything missing):
+   ```bash
+   ./beranode deps
+   ```
+4. Optionally, add to your PATH or create a symlink
 
 ## Usage
 
 ### Basic Commands
+
+#### Check / install host dependencies
+
+```bash
+./beranode deps
+./beranode deps --check
+./beranode deps --yes
+```
+
+Detects macOS (Homebrew) or Linux (apt, apk, dnf, yum, pacman, zypper), logs the version of each required tool, and asks whether to install anything missing locally. `--check` only reports. `--yes` installs without prompting. Foundry and Rust use Homebrew when `brew` is available; otherwise they install into `~/.foundry` (foundryup) and `~/.cargo` (rustup).
 
 #### Initialize a Node
 
@@ -46,20 +63,21 @@ Initialize a new Berachain node with specified configuration.
 **Options:**
 - `--moniker <name>` - Set a custom name for your node
 - `--network <network>` - Network to connect to: `devnet`, `bepolia`, or `mainnet` (default: `devnet`)
-- `--validators <count>` - Number of validator nodes to create
-- `--full-nodes <count>` - Number of full nodes to create
-- `--pruned-nodes <count>` - Number of pruned nodes to create
+- `--validators|--vals <count>` - Number of validator nodes to create
+- `--rpcs <count>` - Number of RPC nodes to create
 - `--skip-snapshot` - Skip official snapshot download on bepolia/mainnet (sync from genesis instead)
-- `--snapshot-type <pruned|archive>` - Force one snapshot type for every node (default: role-mapped)
+- `--snapshot-type <pruned|archive>` - Snapshot type for every node (default: `pruned`). `--snapshot-type=archive` fetches archive snapshots
 - `--beacond-version <tag>` - BeaconKit release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
 - `--berareth-version <tag>` - bera-reth release tag (`latest`, `vX.Y.Z`, or `vX.Y.Z-rc.N`)
-- `--force` - Force initialization (overwrite existing configuration)
+- `--force`, `--yes`, `-y` - Wipe an existing `beranodes/` directory and re-initialize without prompting, including `snapshots/`. Also overwrites `beranodes.config.json` if it is still present after the wipe
 - `--mode <local|docker|serviceman>` - Process runtime (default: `local`)
 - `--docker` - Docker mode (alias for `--mode docker`)
-- `--serviceman` - Serviceman mode (alias for `--mode serviceman`). macOS launchd only
+- `--serviceman` - Serviceman mode (alias for `--mode serviceman`). macOS launchd or Linux systemd + journald
 - `--wallet-private-key <key>` - Private key for the wallet
 - `--wallet-address <address>` - Wallet address
 - `--wallet-balance <amount>` - Initial wallet balance (default: 1000000000000000000000000000)
+
+Existing `beranodes/` directories, configs, and snapshots are handled by prompts; see [Init and start decision tree](#init-and-start-decision-tree).
 
 **Example:**
 ```bash
@@ -69,11 +87,17 @@ Initialize a new Berachain node with specified configuration.
 # Initialize a Bepolia testnet node (official genesis + snapshots)
 ./beranode init --network bepolia --validators 1
 
-# Initialize under launchd on macOS (start/stop manage the service)
-./beranode init --network bepolia --pruned-nodes 1 --mode serviceman
+# Initialize under the host service manager (launchd on macOS, systemd on Linux)
+./beranode init --network bepolia --rpcs 1 --mode serviceman
 
 # Initialize multiple nodes with custom moniker
-./beranode init --moniker mynode --validators 2 --full-nodes 1
+./beranode init --moniker mynode --vals 2 --rpcs 1
+
+# Fetch archive snapshots instead of the default pruned snapshots
+./beranode init --network bepolia --rpcs 1 --snapshot-type=archive
+
+# Wipe an existing beranodes/ tree and start fresh (including snapshots/)
+./beranode init --network bepolia --rpcs 1 --force
 ```
 
 #### Start a Node
@@ -82,7 +106,7 @@ Initialize a new Berachain node with specified configuration.
 ./beranode start [options]
 ```
 
-Start a Berachain node that has been initialized. Network is read from `beranodes.config.json`. In `serviceman` mode this loads launchd jobs instead of backgrounding PIDs.
+Start a Berachain node that has been initialized. Network is read from `beranodes.config.json`. In `serviceman` mode this loads launchd jobs (macOS) or systemd user units (Linux) instead of backgrounding PIDs. How existing logs and `nodes/` directories are treated depends on the network; see [Init and start decision tree](#init-and-start-decision-tree).
 
 **Options:**
 - `--beranodes-dir <path>` - Beranodes data directory (default: `./beranodes`)
@@ -106,7 +130,7 @@ Start a Berachain node that has been initialized. Network is read from `beranode
 ./beranode stop [options]
 ```
 
-Stop nodes from `beranodes.config.json`. Local mode kills PID files; Docker uses compose down; serviceman unloads launchd jobs.
+Stop nodes from `beranodes.config.json`. Local mode kills PID files; Docker uses compose down; serviceman unloads launchd jobs or systemd user units.
 
 **Example:**
 ```bash
@@ -119,7 +143,7 @@ Stop nodes from `beranodes.config.json`. Local mode kills PID files; Docker uses
 ./beranode status [options]
 ```
 
-Display live node status (EL/CL block height, peers, sync) plus host storage: total volume capacity, space used on the device, and the size of `beranodes/nodes`.
+Display live node status (snapshot type, EL/CL block height, peers, sync) plus host storage: total volume capacity, space used on the device, and the size of `beranodes/nodes`. The SNAPSHOT column is `pruned` or `archive` for each node (from `snapshot_type` in `beranodes.config.json`, or the role mapping on older configs). Also reports host memory for each running `beacond` / `bera-reth` binary as used/total RAM (for example `val-0-bera-reth: 4.4gb/68gb (6.47%)`). On macOS, total RAM comes from `sysctl hw.memsize` and process RSS from `ps`; on Linux, total RAM is `MemTotal` in `/proc/meminfo` and RSS is `/proc/<pid>/statm`. Docker mode uses `docker stats` on both platforms.
 
 **Options:**
 - `--verbose|-v` - One row per service (`beacond`, `bera-reth`)
@@ -145,9 +169,9 @@ Download and restore official chain-state snapshots from [bepolia.snapshots.bera
 
 `init --network bepolia` (or `mainnet`) does this automatically. Use `beranode snapshot` to refresh later. Nodes must be stopped before `restore`.
 
-**Defaults:** `rpc-pruned` and `validator` nodes get **pruned** snapshots; `rpc-full` nodes get **archive**. `--snapshot-type pruned|archive` overrides every node.
+**Defaults:** every node gets **pruned** snapshots. Pass `--snapshot-type=archive` (or `--snapshot-type archive`) to fetch **archive** snapshots for every node.
 
-Pruned Bepolia execution snapshots are ~10.5 GB; archive execution is ~42 GB. Mainnet archive execution is ~1 TB. The CLI prints types, sizes, and destination nodes, then continues. If `{network}-beacond-{type}-latest.tar.lz4` and `{network}-reth-{type}-latest.tar.lz4` are already in `beranodes/snapshots/`, you are prompted first: overwrite with a fresh network download (`y`) or keep the local files (`N`, default). Keeping them skips the download. Re-running `init` on an existing `beranodes` directory preserves `beranodes/snapshots/` so previously downloaded archives are not deleted.
+Pruned Bepolia execution snapshots are ~10.5 GB; archive execution is ~42 GB. Mainnet archive execution is ~1 TB. The CLI prints types, sizes, and destination nodes, then continues. If `{network}-beacond-{type}-latest.tar.lz4` and `{network}-reth-{type}-latest.tar.lz4` are already in `beranodes/snapshots/`, you are prompted first: overwrite with a fresh network download (`y`) or keep the local files (`N`, default). Keeping them skips the download. Re-running `init` on an existing `beranodes` directory preserves `beranodes/snapshots/` so previously downloaded archives are not deleted. `init --force` deletes `snapshots/` as well.
 
 Validator keys are generated on public networks, but the node is **not** in the public validator set until you deposit separately. This CLI does not automate that deposit.
 
@@ -251,13 +275,134 @@ beranodes/
 ├── tmp/          # Temporary files
 ├── logs/         # Log files (e.g., silent-smile-forest-0-val-beacond.log)
 ├── runs/         # PID files for running nodes (local mode)
-├── services/     # launchd plists + launchd.json (serviceman mode)
+├── services/     # launchd plists + launchd.json, or systemd units + systemd.json
+├── snapshots/    # Official chain-state archives
+│   ├── bepolia/  # bepolia .tar.lz4 plus unzipped beacond/ and reth/
+│   └── mainnet/  # mainnet .tar.lz4 plus unzipped beacond/ and reth/
 └── nodes/        # Node configurations
     ├── 0-validator       # Validator node 0
     ├── 1-validator       # Validator node 1
-    ├── 2-rpc-full        # RPC full node 2
-    └── 3-rpc-pruned      # RPC pruned node 3
+    ├── 2-rpc             # RPC node 2
+    └── 3-rpc             # RPC node 3
 ```
+
+## Init and start decision tree
+
+`init` writes `beranodes/` (config, binaries, genesis or snapshots). `start` reads that config, prepares each node home, and launches `beacond` + `bera-reth`. Disk state — not the flags alone — decides what each command does.
+
+### Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Uninitialized: no beranodes/
+    Uninitialized --> Initialized: beranode init
+    Initialized --> Initialized: init, decline re-init\n(no changes)
+    Initialized --> Initialized: init, confirm re-init\n(wipe except snapshots/)
+    Initialized --> Running: beranode start
+    Running --> Initialized: beranode stop\n(chain data kept)
+```
+
+| State | On disk | Typical next command |
+| --- | --- | --- |
+| Uninitialized | No `beranodes/` (or you declined re-init) | `init` |
+| Initialized | `beranodes.config.json` plus binaries; node homes and snapshots may already exist | `start`, or `init` to wipe and recreate |
+| Running | Same as initialized, plus live PIDs / launchd or systemd jobs / compose | `status`, `stop` |
+
+### `beranode init`
+
+```mermaid
+flowchart TD
+    A[beranode init] --> B{beranodes/ exists?}
+    B -->|no| C[Create bin tmp logs nodes runs snapshots]
+    B -->|yes| D{"--force/--yes/-y, or prompt: remove and re-initialize? (y/n)"}
+    D -->|n / other| E[Abort: leave tree unchanged]
+    D -->|y| F{snapshots/ exists?}
+    D -->|--force| H[rm -rf beranodes/ including snapshots/]
+    F -->|yes| G[Delete everything except snapshots/]
+    F -->|no| H
+    G --> C
+    H --> C
+    C --> I{beacond / bera-reth usable?}
+    I -->|no| J[Download or build binaries]
+    I -->|yes| K[Keep existing binaries]
+    J --> L[Write beranodes.config.json]
+    K --> L
+    L --> M{network}
+    M -->|devnet| N[Generate local eth-genesis and beacond genesis]
+    M -->|bepolia / mainnet| O{skip-snapshot?}
+    O -->|yes| P[Official genesis only: sync from network]
+    O -->|no| Q{local latest snapshot archives?}
+    Q -->|no| R[Download latest]
+    Q -->|yes| S["Prompt: overwrite with fresh latest? y/N"]
+    S -->|n / default / non-interactive| T[Keep local archives]
+    S -->|y| R
+    T --> U[beacond init per node if home missing, then restore snapshots]
+    R --> U
+```
+
+Re-init always unloads leftover launchd or systemd jobs for that directory before wiping. Answering `y` to the prompt preserves `snapshots/` if it exists. `--force` / `--yes` / `-y` skips the prompt and deletes the whole tree, including `snapshots/`.
+
+If `beranodes.config.json` is still present after directory setup, init asks whether to overwrite it. `n` keeps that file and **skips** genesis, keys, node homes, and snapshot restore. `--force` overwrites that file without asking.
+
+On bepolia/mainnet, `beacond init` is skipped when `nodes/<i>-<role>/beacond/config/config.toml` already exists so snapshot data is not wiped. `--skip-snapshot` skips the download/restore and the node syncs from the public network instead.
+
+### `beranode start`
+
+```mermaid
+flowchart TD
+    A[beranode start] --> B{beranodes.config.json valid?}
+    B -->|missing / invalid| X[Error: stop]
+    B -->|ok| C{configured ports in use?}
+    C -->|yes| X
+    C -->|no| D{binaries or docker images present?}
+    D -->|no| X
+    D -->|yes| E{logs/ has files?}
+    E -->|no| G
+    E -->|yes| F{"--logs-reset, or prompt: remove existing log files? (y/n)"}
+    F -->|y / --logs-reset| F1[Delete log files]
+    F -->|n / other| F2[Keep log files]
+    F1 --> G
+    F2 --> G
+    G{nodes/ has content?}
+    G -->|empty| I
+    G -->|yes, bepolia / mainnet| H[Keep dirs: no prompt]
+    G -->|yes, devnet| J["Prompt: delete them? (y/n)"]
+    J -->|y| K[Wipe nodes/ and recreate]
+    J -->|n / other| H2[Keep dirs]
+    H --> I
+    K --> I
+    H2 --> I
+    I[For each node] --> L{beacond config.toml exists?}
+    L -->|yes| M[Skip beacond init: keep CL data]
+    L -->|no| N[beacond init]
+    M --> O[Rewrite keys, genesis.json, jwt, tomls]
+    N --> O
+    O --> P{skip bera-reth init?}
+    P -->|bepolia / mainnet| Q[Skip: keep EL / snapshot data]
+    P -->|devnet, db exists| Q2[Skip: keep EL data]
+    P -->|devnet, no db| R[bera-reth init: resets EL datadir]
+    Q --> S[Launch processes]
+    Q2 --> S
+    R --> S
+```
+
+Start always rewrites consensus keys (`priv_validator_key.json`, `node_key.json`), `genesis.json`, `jwt.hex`, toml configs, and the bera-reth `discovery-secret` from `beranodes.config.json`, even when node directories are kept. Chain databases are the exception: CL data is kept when `config.toml` already exists; EL data is kept on public networks because `bera-reth init` is not run, and on devnet when `bera-reth/db` already exists.
+
+On **devnet**, answering `n` to the node-directory prompt keeps existing homes and continues start (same as the log prompt). Public networks keep dirs with no prompt.
+
+### Prompt summary
+
+| Command | When | Prompt | `y` | `n` |
+| --- | --- | --- | --- | --- |
+| `init` | `beranodes/` exists | Remove and re-initialize? | Wipe tree (`snapshots/` kept if present), then init | Abort, no changes |
+| `init` | `beranodes.config.json` still present | Overwrite it? | Rewrite config and continue genesis/snapshots | Keep config; skip genesis, homes, snapshots |
+| `init` | Public network, local latest snapshot archives | Overwrite with a fresh latest snapshot? `[y/N]` | Download again | Keep local files (default; also the non-interactive choice) |
+| `init` | Devnet, `tmp/genesis.json` exists | Overwrite the existing genesis file? | Regenerate genesis | Skip genesis generation |
+| `start` | `beranodes/logs/` has files | Remove existing log files? | Delete logs | Keep logs, continue |
+| `start` | `beranodes/nodes/` has content, **devnet** | Delete them? | Wipe and recreate homes | Keep dirs, continue |
+| `start` | `beranodes/nodes/` has content, **bepolia/mainnet** | _(none)_ | — | Dirs kept automatically |
+
+`init --force` (`--yes` / `-y`) wipes the whole `beranodes/` tree including `snapshots/` (and leftover config overwrite) without asking. `start --logs-reset` answers `y` to the log prompt without asking.
 
 ## Examples
 
@@ -271,32 +416,30 @@ beranodes/
 ./beranode start
 ```
 
-### Serviceman mode (macOS launchd)
+### Serviceman mode (macOS launchd / Linux systemd)
 
-`serviceman` is local-mode binaries supervised by launchd. Init still downloads native `beacond` / `bera-reth`; the difference is start/stop/logs.
+`serviceman` is local-mode binaries supervised by the host service manager. Init still downloads native `beacond` / `bera-reth`; the difference is start/stop/logs.
 
 ```bash
-./beranode init --network bepolia --pruned-nodes 1 --serviceman
+./beranode init --network bepolia --rpcs 1 --serviceman
 ./beranode start
 ./beranode stop
 ```
 
-- Requires macOS and `launchctl`. Linux systemd is not implemented yet; init fails instead of falling back to local.
-- Jobs are user LaunchAgents (`~/Library/LaunchAgents/com.berachain.beranode.<hash>.<moniker>.<index>.<component>.plist`), not system daemons (no root).
-- `KeepAlive` restarts a crashed process. `beranode stop` unloads the jobs and removes those LaunchAgents so they do not come back at login. Plist copies remain in `beranodes/services/` for inspection.
-- Stdout and stderr go to the same files as local mode under `beranodes/logs/`.
+- macOS: requires `launchctl`. Jobs are user LaunchAgents (`~/Library/LaunchAgents/com.berachain.beranode.<hash>.<moniker>.<index>.<component>.plist`), not system daemons (no root). `KeepAlive` restarts a crashed process. `beranode stop` unloads the jobs and removes those LaunchAgents so they do not come back at login. Plist copies remain in `beranodes/services/` for inspection. Stdout and stderr go to `beranodes/logs/`.
+- Linux: requires systemd (`systemctl`, `/run/systemd/system`) and journald (`journalctl`, journal socket), plus a working `systemctl --user` session. Units are user services (`~/.config/systemd/user/com.berachain.beranode.<hash>.<moniker>.<index>.<component>.service`), not system daemons (no root). `Restart=always` with a 10s delay matches launchd KeepAlive. Logs go to journald (`journalctl --user -u <unit> -f`) and are mirrored to `beranodes/logs/`. Unit copies and `systemd.json` live in `beranodes/services/`. `beranode stop` disables and removes those user units. If lingering is off, units may stop on logout; enable with `sudo loginctl enable-linger $USER`.
+- Init fails instead of falling back to local when the platform service manager is missing.
 - Do not combine `--docker` and `--serviceman`.
 
 ### Multi-Node Setup
 
 ```bash
-# Initialize a network with multiple node types
+# Initialize a network with validators and RPC nodes
 ./beranode init \
   --moniker mynetwork \
   --network devnet \
-  --validators 2 \
-  --full-nodes 1 \
-  --pruned-nodes 1
+  --vals 2 \
+  --rpcs 1
 ```
 
 ### Custom Wallet Configuration
@@ -405,6 +548,9 @@ The test suite uses a custom lightweight bash testing framework ([tests/test_fra
   - Duration validation (s, m, h, ms, us, ns)
 - **[test_download.sh](tests/test_download.sh)** - Tests for GitHub release asset URL matching
 - **[test_snapshots.sh](tests/test_snapshots.sh)** - Tests for public-network URL mapping, role→snapshot type, and index.csv selection
+- **[test_deps.sh](tests/test_deps.sh)** - Tests for OS/package-manager detection, version parsing, and dry-run installs
+- **[test_serviceman.sh](tests/test_serviceman.sh)** - Tests for launchd plist generation, systemd unit/journald quoting, and platform gates
+- **[test_init.sh](tests/test_init.sh)** - Tests for `init --force` / `--yes` / `-y` wiping an existing `beranodes/` tree including `snapshots/`
 
 ### Running Tests
 
@@ -415,6 +561,9 @@ cd tests
 ./test_validation.sh
 ./test_download.sh
 ./test_snapshots.sh
+./test_deps.sh
+./test_serviceman.sh
+./test_init.sh
 ```
 
 Or run from the project root:
@@ -423,6 +572,9 @@ Or run from the project root:
 bash tests/test_validation.sh
 bash tests/test_download.sh
 bash tests/test_snapshots.sh
+bash tests/test_deps.sh
+bash tests/test_serviceman.sh
+bash tests/test_init.sh
 ```
 
 ### Test Output Example
@@ -491,7 +643,7 @@ Do not edit historical `## [X.Y.Z]` sections. When releasing, promote `[Unreleas
 
 ## Versioning
 
-This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current CLI version is **0.11.0**. The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary. `beranode version` / `--version` / `-v` print `beranode v${BERANODE_VERSION}`.
+This project follows [Semantic Versioning](https://semver.org/) (SemVer). The current CLI version is **0.12.0**. The single source of truth is `BERANODE_VERSION` in [src/lib/constants.sh](src/lib/constants.sh). `build.sh` reads that value when it generates the `beranode` binary. `beranode version` / `--version` / `-v` print `beranode v${BERANODE_VERSION}`.
 
 Version numbers use `MAJOR.MINOR.PATCH`, with optional prereleases:
 

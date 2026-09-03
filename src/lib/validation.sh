@@ -190,12 +190,12 @@ validate_mode() {
 	[[ "$value" =~ ^(local|docker|serviceman)$ ]]
 }
 
-# Validates role (validator, full_node, pruned_node)
+# Validates role (validator, rpc; legacy rpc-full / rpc-pruned still accepted)
 # Parameters: $1 - value to validate
 # Returns: 0 if valid, 1 if invalid
 validate_role() {
 	local value="$1"
-	[[ "$value" =~ ^(validator|rpc-full|rpc-pruned)$ ]]
+	[[ "$value" =~ ^(validator|rpc|rpc-full|rpc-pruned)$ ]]
 }
 
 ################################################################################
@@ -283,7 +283,7 @@ validate_config_field() {
 	# Top-level fields
 	moniker | configtoml_moniker) validate_moniker "$value" ;;
 	network | apptoml_beacon_kit_chain_spec) validate_network "$value" ;;
-	validators | full_nodes | pruned_nodes | total_nodes) validate_integer "$value" ;;
+	validators | rpcs | full_nodes | pruned_nodes | total_nodes) validate_integer "$value" ;;
 	beranode_dir | genesis_file | genesis_eth_file | *_path | *_file | *_dir) validate_path "$value" ;;
 	mode) validate_mode "$value" ;;
 	wallet_private_key) validate_hex_private_key "$value" ;;

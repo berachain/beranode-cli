@@ -1,42 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ################################################################################
-# serviceman.sh - OS service-manager helpers (macOS launchd)
+# serviceman.sh - OS service-manager helpers (macOS launchd / Linux systemd)
 ################################################################################
 #
 # serviceman mode runs the same native binaries as local mode, but start/stop
 # go through the host service manager instead of background PIDs.
 #
-# macOS: user-domain launchd (LaunchAgents). Linux systemd is not implemented.
+# macOS:  user-domain launchd (LaunchAgents). Logs: beranodes/logs/ via plist.
+# Linux:  systemd user units + journald. Logs: journald and beranodes/logs/.
 #
 ################################################################################
 
 : "${DEBUG_MODE:=false}"
 
 ################################################################################
-# Platform / launchctl
+# Platform dispatch
 ################################################################################
 
-serviceman_require_launchd() {
-	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: serviceman_require_launchd" >&2
-
-	if [[ "${IS_MACOS}" != "true" ]]; then
-		if [[ "${IS_LINUX}" == "true" ]]; then
-			log_error "serviceman mode on Linux (systemd) is not implemented yet."
-			log_error "Use 'beranode init --mode local' or '--mode docker' on this platform."
-		else
-			log_error "serviceman mode is only available on macOS (launchd)."
-		fi
-		return 1
+# Prints: launchd | systemd | ""
+serviceman_backend() {
+	if [[ "${IS_MACOS}" == "true" ]]; then
+		echo "launchd"
+	elif [[ "${IS_LINUX}" == "true" ]]; then
+		echo "systemd"
+	else
+		echo ""
 	fi
-
-	if ! command -v launchctl >/dev/null 2>&1; then
-		log_error "launchctl not found. macOS launchd is required for --mode serviceman."
-		return 1
-	fi
-
-	return 0
 }
+
+serviceman_backend_description() {
+	case "$(serviceman_backend)" in
+	launchd) echo "launchd (user LaunchAgents)" ;;
+	systemd) echo "systemd (user units) + journald" ;;
+	*) echo "unavailable on this platform" ;;
+	esac
+}
+
+# Ensures the host service manager for --mode serviceman is present.
+serviceman_require() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: serviceman_require" >&2
+
+	case "$(serviceman_backend)" in
+	launchd)
+		serviceman_require_launchd
+		;;
+	systemd)
+		serviceman_require_systemd
+		;;
+	*)
+		log_error "serviceman mode is only available on macOS (launchd) and Linux (systemd)."
+		log_error "Use 'beranode init --mode local' or '--mode docker' on this platform."
+		return 1
+		;;
+	esac
+}
+
+################################################################################
+# Shared identity helpers
+################################################################################
 
 serviceman_abspath() {
 	local path="$1"
@@ -80,6 +102,107 @@ serviceman_xml_escape() {
 	printf '%s' "${s}"
 }
 
+serviceman_label() {
+	local beranodes_dir="$1"
+	local moniker="$2"
+	local node_index="$3"
+	local component="$4"
+	local abs hash mono
+	abs=$(serviceman_abspath "${beranodes_dir}")
+	hash=$(serviceman_path_hash "${abs}")
+	mono=$(serviceman_sanitize_label_part "${moniker}")
+	component=$(serviceman_sanitize_label_part "${component}")
+	echo "${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.${hash}.${mono}.${node_index}.${component}"
+}
+
+serviceman_manifest_path() {
+	local beranodes_dir="$1"
+	case "$(serviceman_backend)" in
+	systemd) echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/systemd.json" ;;
+	*) echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/launchd.json" ;;
+	esac
+}
+
+serviceman_write_fresh_manifest() {
+	local beranodes_dir="$1"
+	local domain="$2"
+	local abs backend
+	abs=$(serviceman_abspath "${beranodes_dir}")
+	backend=$(serviceman_backend)
+	mkdir -p "${abs}${BERANODES_PATH_SERVICES}"
+	jq -n \
+		--arg backend "${backend}" \
+		--arg domain "${domain}" \
+		--arg dir "${abs}" \
+		'{backend: $backend, domain: $domain, beranodes_dir: $dir, services: []}' \
+		>"$(serviceman_manifest_path "${abs}")"
+}
+
+serviceman_manifest_add() {
+	local beranodes_dir="$1"
+	local label="$2"
+	local component="$3"
+	local node_index="$4"
+	local artifact="$5"
+	local log_file="$6"
+	local abs manifest tmp backend domain
+	abs=$(serviceman_abspath "${beranodes_dir}")
+	manifest=$(serviceman_manifest_path "${abs}")
+	backend=$(serviceman_backend)
+	if [[ ! -f "${manifest}" ]]; then
+		case "${backend}" in
+		systemd) domain="user" ;;
+		*) domain=$(serviceman_launchd_domain) ;;
+		esac
+		serviceman_write_fresh_manifest "${abs}" "${domain}"
+	fi
+	tmp=$(mktemp)
+	if [[ "${backend}" == "systemd" ]]; then
+		jq \
+			--arg label "${label}" \
+			--arg component "${component}" \
+			--argjson index "${node_index}" \
+			--arg unit "${artifact}" \
+			--arg log "${log_file}" \
+			'.services += [{label: $label, component: $component, node_index: $index, unit: $unit, log: $log}]' \
+			"${manifest}" >"${tmp}"
+	else
+		jq \
+			--arg label "${label}" \
+			--arg component "${component}" \
+			--argjson index "${node_index}" \
+			--arg plist "${artifact}" \
+			--arg log "${log_file}" \
+			'.services += [{label: $label, component: $component, node_index: $index, plist: $plist, log: $log}]' \
+			"${manifest}" >"${tmp}"
+	fi
+	mv "${tmp}" "${manifest}"
+}
+
+################################################################################
+# macOS launchd
+################################################################################
+
+serviceman_require_launchd() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: serviceman_require_launchd" >&2
+
+	if [[ "${IS_MACOS}" != "true" ]]; then
+		if [[ "${IS_LINUX}" == "true" ]]; then
+			serviceman_require_systemd
+			return $?
+		fi
+		log_error "serviceman mode is only available on macOS (launchd) and Linux (systemd)."
+		return 1
+	fi
+
+	if ! command -v launchctl >/dev/null 2>&1; then
+		log_error "launchctl not found. macOS launchd is required for --mode serviceman."
+		return 1
+	fi
+
+	return 0
+}
+
 serviceman_launchd_domain() {
 	local uid
 	uid="$(id -u)"
@@ -92,19 +215,6 @@ serviceman_launchd_domain() {
 
 serviceman_launchagents_dir() {
 	echo "${HOME}/Library/LaunchAgents"
-}
-
-serviceman_label() {
-	local beranodes_dir="$1"
-	local moniker="$2"
-	local node_index="$3"
-	local component="$4"
-	local abs hash mono
-	abs=$(serviceman_abspath "${beranodes_dir}")
-	hash=$(serviceman_path_hash "${abs}")
-	mono=$(serviceman_sanitize_label_part "${moniker}")
-	component=$(serviceman_sanitize_label_part "${component}")
-	echo "${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.${hash}.${mono}.${node_index}.${component}"
 }
 
 serviceman_plist_filename() {
@@ -122,15 +232,6 @@ serviceman_repo_plist_path() {
 	local label="$2"
 	echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/$(serviceman_plist_filename "${label}")"
 }
-
-serviceman_manifest_path() {
-	local beranodes_dir="$1"
-	echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/launchd.json"
-}
-
-################################################################################
-# Plist generation
-################################################################################
 
 # Writes a launchd plist. Remaining args after the named parameters are
 # ProgramArguments (executable + flags).
@@ -194,52 +295,6 @@ EOF
 	echo "${user_plist}"
 }
 
-################################################################################
-# Manifest
-################################################################################
-
-serviceman_write_fresh_manifest() {
-	local beranodes_dir="$1"
-	local domain="$2"
-	local abs
-	abs=$(serviceman_abspath "${beranodes_dir}")
-	mkdir -p "${abs}${BERANODES_PATH_SERVICES}"
-	jq -n \
-		--arg domain "${domain}" \
-		--arg dir "${abs}" \
-		'{domain: $domain, beranodes_dir: $dir, services: []}' \
-		>"$(serviceman_manifest_path "${abs}")"
-}
-
-serviceman_manifest_add() {
-	local beranodes_dir="$1"
-	local label="$2"
-	local component="$3"
-	local node_index="$4"
-	local plist="$5"
-	local log_file="$6"
-	local abs manifest tmp
-	abs=$(serviceman_abspath "${beranodes_dir}")
-	manifest=$(serviceman_manifest_path "${abs}")
-	if [[ ! -f "${manifest}" ]]; then
-		serviceman_write_fresh_manifest "${abs}" "$(serviceman_launchd_domain)"
-	fi
-	tmp=$(mktemp)
-	jq \
-		--arg label "${label}" \
-		--arg component "${component}" \
-		--argjson index "${node_index}" \
-		--arg plist "${plist}" \
-		--arg log "${log_file}" \
-		'.services += [{label: $label, component: $component, node_index: $index, plist: $plist, log: $log}]' \
-		"${manifest}" >"${tmp}"
-	mv "${tmp}" "${manifest}"
-}
-
-################################################################################
-# launchctl bootstrap / bootout
-################################################################################
-
 serviceman_bootout() {
 	local domain="$1"
 	local label="$2"
@@ -266,7 +321,7 @@ serviceman_bootstrap() {
 	return 0
 }
 
-serviceman_service_state() {
+serviceman_launchd_service_state() {
 	local domain="$1"
 	local label="$2"
 	local print_out pid
@@ -286,6 +341,290 @@ serviceman_service_state() {
 	echo "stopped"
 }
 
+################################################################################
+# Linux systemd + journald
+################################################################################
+
+# True when the systemctl and journalctl binaries are on PATH.
+serviceman_systemd_binaries_present() {
+	command -v systemctl >/dev/null 2>&1 && command -v journalctl >/dev/null 2>&1
+}
+
+# True when systemd is the running init (not merely packaged).
+serviceman_systemd_is_init() {
+	[[ -d /run/systemd/system ]]
+}
+
+# True when journald is accepting connections.
+serviceman_journald_is_running() {
+	[[ -S /run/systemd/journal/socket ]] || [[ -S /run/systemd/journal/stdout ]] || [[ -d /run/systemd/journal ]]
+}
+
+# Sets XDG_RUNTIME_DIR / session bus when a user systemd instance exists.
+serviceman_systemd_prepare_env() {
+	local uid rundir
+	uid="$(id -u)"
+	rundir="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+	if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "${rundir}" ]]; then
+		export XDG_RUNTIME_DIR="${rundir}"
+	fi
+	if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -n "${XDG_RUNTIME_DIR:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+		export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+	fi
+}
+
+# True when `systemctl --user` can talk to the user instance.
+serviceman_systemd_user_available() {
+	serviceman_systemd_prepare_env
+	systemctl --user show-environment >/dev/null 2>&1
+}
+
+serviceman_systemd_user_dir() {
+	echo "${XDG_CONFIG_HOME:-${HOME}/.config}/systemd/user"
+}
+
+serviceman_unit_filename() {
+	local label="$1"
+	echo "${label}.service"
+}
+
+serviceman_user_unit_path() {
+	local label="$1"
+	echo "$(serviceman_systemd_user_dir)/$(serviceman_unit_filename "${label}")"
+}
+
+serviceman_repo_unit_path() {
+	local beranodes_dir="$1"
+	local label="$2"
+	echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/$(serviceman_unit_filename "${label}")"
+}
+
+serviceman_systemd_runner_path() {
+	local beranodes_dir="$1"
+	echo "${beranodes_dir}${BERANODES_PATH_SERVICES}/${SERVICEMAN_SYSTEMD_RUNNER_NAME}"
+}
+
+# Quotes one ExecStart / unit-file word for systemd (not shell).
+# systemd expands $VAR and %i; double them so they stay literal.
+serviceman_systemd_quote() {
+	local s="${1-}"
+	s=${s//\\/\\\\}
+	s=${s//\"/\\\"}
+	s=${s//\$/\$\$}
+	s=${s//\%/%%}
+	printf '"%s"' "${s}"
+}
+
+serviceman_write_systemd_runner() {
+	local dest="$1"
+	mkdir -p "$(dirname "${dest}")"
+	cat >"${dest}" <<'RUNNER'
+#!/usr/bin/env bash
+# Mirror stdout/stderr to a log file while leaving the original stdout
+# (journald via StandardOutput=journal) intact. exec keeps systemd MainPID
+# as the node binary.
+set -euo pipefail
+log_file="$1"
+shift
+mkdir -p "$(dirname "${log_file}")"
+: >>"${log_file}"
+exec > >(tee -a "${log_file}")
+exec 2>&1
+exec "$@"
+RUNNER
+	chmod +x "${dest}"
+}
+
+# Writes a systemd user unit. Remaining args after the named parameters are
+# the command line (executable + flags).
+#
+# $1 beranodes_dir  $2 label  $3 working_dir  $4 log_file  $5... program args
+serviceman_write_unit() {
+	local beranodes_dir="$1"
+	local label="$2"
+	local working_dir="$3"
+	local log_file="$4"
+	shift 4
+
+	local user_unit repo_unit runner unit_name exec_line arg
+	user_unit=$(serviceman_user_unit_path "${label}")
+	repo_unit=$(serviceman_repo_unit_path "${beranodes_dir}" "${label}")
+	runner=$(serviceman_systemd_runner_path "${beranodes_dir}")
+	unit_name=$(serviceman_unit_filename "${label}")
+
+	mkdir -p "$(serviceman_systemd_user_dir)"
+	mkdir -p "${beranodes_dir}${BERANODES_PATH_SERVICES}"
+	mkdir -p "$(dirname "${log_file}")"
+	mkdir -p "${working_dir}"
+
+	serviceman_write_systemd_runner "${runner}"
+
+	exec_line="$(serviceman_systemd_quote "${runner}") $(serviceman_systemd_quote "${log_file}")"
+	for arg in "$@"; do
+		exec_line="${exec_line} $(serviceman_systemd_quote "${arg}")"
+	done
+
+	local unit_body
+	unit_body=$(cat <<EOF
+[Unit]
+Description=Beranode ${label}
+Documentation=man:journalctl(1)
+
+[Service]
+Type=simple
+WorkingDirectory=$(serviceman_systemd_quote "${working_dir}")
+ExecStart=${exec_line}
+Restart=always
+RestartSec=${SERVICEMAN_SYSTEMD_RESTART_SEC}
+StartLimitIntervalSec=0
+TimeoutStopSec=${SERVICEMAN_SYSTEMD_TIMEOUT_STOP_SEC}
+KillMode=control-group
+LimitNOFILE=${SERVICEMAN_SYSTEMD_LIMIT_NOFILE}
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=${label}
+
+[Install]
+WantedBy=default.target
+EOF
+)
+
+	printf '%s\n' "${unit_body}" >"${repo_unit}"
+	cp -f "${repo_unit}" "${user_unit}"
+	echo "${user_unit}"
+}
+
+serviceman_require_systemd() {
+	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: serviceman_require_systemd" >&2
+
+	if [[ "${IS_LINUX}" != "true" ]]; then
+		log_error "systemd serviceman mode is only available on Linux."
+		return 1
+	fi
+
+	if ! command -v systemctl >/dev/null 2>&1; then
+		log_error "systemctl not found. systemd is required for --mode serviceman on Linux."
+		log_error "Install systemd, or use 'beranode init --mode local' or '--mode docker'."
+		return 1
+	fi
+
+	if ! serviceman_systemd_is_init; then
+		log_error "systemd is not the active init system (missing /run/systemd/system)."
+		log_error "Use 'beranode init --mode local' or '--mode docker' on this host."
+		return 1
+	fi
+
+	if ! command -v journalctl >/dev/null 2>&1; then
+		log_error "journalctl not found. systemd-journald is required for --mode serviceman on Linux."
+		return 1
+	fi
+
+	if ! serviceman_journald_is_running; then
+		log_error "systemd-journald does not appear to be running (no journal socket under /run/systemd/journal)."
+		log_error "Start systemd-journald, or use 'beranode init --mode local' or '--mode docker'."
+		return 1
+	fi
+
+	if ! command -v tee >/dev/null 2>&1; then
+		log_error "tee not found. It is required to mirror logs to beranodes/logs/ under systemd."
+		return 1
+	fi
+
+	serviceman_systemd_prepare_env
+	if ! serviceman_systemd_user_available; then
+		log_error "systemd user instance is not available (systemctl --user failed)."
+		log_error "Log in with a systemd user session (XDG_RUNTIME_DIR=/run/user/$(id -u))."
+		log_error "On a headless host you may need: sudo loginctl enable-linger $(id -un)"
+		return 1
+	fi
+
+	return 0
+}
+
+serviceman_systemd_ensure_linger() {
+	local user linger
+	user="$(id -un)"
+	command -v loginctl >/dev/null 2>&1 || return 0
+	linger=$(loginctl show-user "${user}" --property=Linger --value 2>/dev/null || echo "no")
+	if [[ "${linger}" == "yes" ]]; then
+		return 0
+	fi
+	if loginctl enable-linger "${user}" >/dev/null 2>&1; then
+		log_info "Enabled systemd lingering for ${user} so user units survive logout."
+		return 0
+	fi
+	log_warn "systemd lingering is not enabled for ${user}."
+	log_warn "User services may stop on logout. Enable with: sudo loginctl enable-linger ${user}"
+	return 0
+}
+
+serviceman_systemd_stop_unit() {
+	local label="$1"
+	local unit_name user_unit
+	unit_name=$(serviceman_unit_filename "${label}")
+	user_unit=$(serviceman_user_unit_path "${label}")
+	serviceman_systemd_prepare_env
+	systemctl --user disable --now "${unit_name}" >/dev/null 2>&1 || true
+	systemctl --user reset-failed "${unit_name}" >/dev/null 2>&1 || true
+	rm -f "${user_unit}"
+}
+
+serviceman_systemd_start_unit() {
+	local label="$1"
+	local user_unit="$2"
+	local unit_name
+	unit_name=$(serviceman_unit_filename "${label}")
+	serviceman_systemd_prepare_env
+	systemctl --user daemon-reload >/dev/null 2>&1 || true
+	if ! systemctl --user enable --now "${unit_name}" >/dev/null 2>&1; then
+		log_error "systemctl --user enable --now failed for ${unit_name}"
+		log_error "Unit: ${user_unit}"
+		return 1
+	fi
+	return 0
+}
+
+serviceman_systemd_service_state() {
+	local label="$1"
+	local unit_name load_state active_state
+	unit_name=$(serviceman_unit_filename "${label}")
+	serviceman_systemd_prepare_env
+	load_state=$(systemctl --user show "${unit_name}" -p LoadState --value 2>/dev/null || echo "not-found")
+	if [[ "${load_state}" == "not-found" || -z "${load_state}" ]]; then
+		echo "offline"
+		return 0
+	fi
+	active_state=$(systemctl --user show "${unit_name}" -p ActiveState --value 2>/dev/null || echo "unknown")
+	case "${active_state}" in
+	active | activating | reloading)
+		echo "running"
+		;;
+	inactive | failed | deactivating)
+		echo "stopped"
+		;;
+	*)
+		echo "offline"
+		;;
+	esac
+}
+
+################################################################################
+# Start / stop / status (backend-agnostic)
+################################################################################
+
+serviceman_service_state() {
+	local domain="$1"
+	local label="$2"
+	case "$(serviceman_backend)" in
+	systemd)
+		serviceman_systemd_service_state "${label}"
+		;;
+	*)
+		serviceman_launchd_service_state "${domain}" "${label}"
+		;;
+	esac
+}
+
 serviceman_component_status() {
 	local beranodes_dir="$1"
 	local moniker="$2"
@@ -293,15 +632,94 @@ serviceman_component_status() {
 	local component="$4"
 	local label domain
 	label=$(serviceman_label "${beranodes_dir}" "${moniker}" "${node_index}" "${component}")
-	domain=$(serviceman_launchd_domain)
-	serviceman_service_state "${domain}" "${label}"
+	case "$(serviceman_backend)" in
+	systemd)
+		serviceman_systemd_service_state "${label}"
+		;;
+	*)
+		domain=$(serviceman_launchd_domain)
+		serviceman_launchd_service_state "${domain}" "${label}"
+		;;
+	esac
 }
 
-################################################################################
-# Start / stop a node's processes
-################################################################################
+# Prints the PID of a running component, or empty if it is not running.
+# launchd: job PID. systemd: prefers the beacond/bera-reth child of the
+# wrapper (MainPID is the log-tee runner); falls back to MainPID.
+serviceman_component_pid() {
+	local beranodes_dir="$1"
+	local moniker="$2"
+	local node_index="$3"
+	local component="$4"
+	local label
+	label=$(serviceman_label "${beranodes_dir}" "${moniker}" "${node_index}" "${component}")
+	case "$(serviceman_backend)" in
+	systemd)
+		serviceman_systemd_component_pid "${label}" "${component}"
+		;;
+	*)
+		serviceman_launchd_component_pid "${label}"
+		;;
+	esac
+}
 
-# Starts one process under launchd. Remaining args are the command line.
+serviceman_launchd_component_pid() {
+	local label="$1"
+	local domain print_out pid
+	if [[ "${IS_MACOS}" != "true" ]] || ! command -v launchctl >/dev/null 2>&1; then
+		echo ""
+		return 1
+	fi
+	domain=$(serviceman_launchd_domain)
+	if ! print_out=$(launchctl print "${domain}/${label}" 2>/dev/null); then
+		echo ""
+		return 1
+	fi
+	pid=$(printf '%s\n' "${print_out}" | awk '/[[:space:]]pid = / {print $3; exit}')
+	if [[ -n "${pid}" && "${pid}" != "0" && "${pid}" =~ ^[0-9]+$ ]]; then
+		echo "${pid}"
+		return 0
+	fi
+	echo ""
+	return 1
+}
+
+serviceman_systemd_component_pid() {
+	local label="$1"
+	local component="$2"
+	local unit_name main_pid child_pid comm
+	if [[ "${IS_LINUX}" != "true" ]] || ! command -v systemctl >/dev/null 2>&1; then
+		echo ""
+		return 1
+	fi
+	unit_name=$(serviceman_unit_filename "${label}")
+	serviceman_systemd_prepare_env
+	main_pid=$(systemctl --user show "${unit_name}" -p MainPID --value 2>/dev/null) || main_pid=""
+	if [[ -z "${main_pid}" || "${main_pid}" == "0" || ! "${main_pid}" =~ ^[0-9]+$ ]]; then
+		echo ""
+		return 1
+	fi
+	# Wrapper is `bash runner log_file <binary> ... | tee`. Prefer the binary.
+	local children=""
+	children=$(pgrep -P "${main_pid}" 2>/dev/null || true)
+	if [[ -z "${children}" && -r "/proc/${main_pid}/task/${main_pid}/children" ]]; then
+		children=$(tr ' ' '\n' <"/proc/${main_pid}/task/${main_pid}/children" 2>/dev/null || true)
+	fi
+	while IFS= read -r child_pid; do
+		[[ "${child_pid}" =~ ^[0-9]+$ ]] || continue
+		comm=$(ps -o comm= -p "${child_pid}" 2>/dev/null | tr -d ' ')
+		case "${comm}" in
+		*"${component}"*)
+			echo "${child_pid}"
+			return 0
+			;;
+		esac
+	done <<<"${children}"
+	echo "${main_pid}"
+	return 0
+}
+
+# Starts one process under the host service manager. Remaining args are argv.
 # $1 beranodes_dir  $2 moniker  $3 node_index  $4 component
 # $5 working_dir  $6 log_file  $7... argv
 serviceman_start_service() {
@@ -315,18 +733,32 @@ serviceman_start_service() {
 	local log_file="$6"
 	shift 6
 
-	serviceman_require_launchd || return 1
+	serviceman_require || return 1
 
-	local abs domain label user_plist
+	local abs label
 	abs=$(serviceman_abspath "${beranodes_dir}")
-	domain=$(serviceman_launchd_domain)
 	label=$(serviceman_label "${abs}" "${moniker}" "${node_index}" "${component}")
 
-	serviceman_bootout "${domain}" "${label}"
-	user_plist=$(serviceman_write_plist "${abs}" "${label}" "${working_dir}" "${log_file}" "$@")
-	serviceman_bootstrap "${domain}" "${user_plist}" "${label}" || return 1
-	serviceman_manifest_add "${abs}" "${label}" "${component}" "${node_index}" "${user_plist}" "${log_file}"
-	log_info "launchd: ${label}"
+	case "$(serviceman_backend)" in
+	systemd)
+		local user_unit
+		serviceman_systemd_stop_unit "${label}"
+		user_unit=$(serviceman_write_unit "${abs}" "${label}" "${working_dir}" "${log_file}" "$@")
+		serviceman_systemd_start_unit "${label}" "${user_unit}" || return 1
+		serviceman_manifest_add "${abs}" "${label}" "${component}" "${node_index}" "${user_unit}" "${log_file}"
+		log_info "systemd: ${label}.service"
+		log_info "journald: journalctl --user -u ${label}.service -f"
+		;;
+	*)
+		local domain user_plist
+		domain=$(serviceman_launchd_domain)
+		serviceman_bootout "${domain}" "${label}"
+		user_plist=$(serviceman_write_plist "${abs}" "${label}" "${working_dir}" "${log_file}" "$@")
+		serviceman_bootstrap "${domain}" "${user_plist}" "${label}" || return 1
+		serviceman_manifest_add "${abs}" "${label}" "${component}" "${node_index}" "${user_plist}" "${log_file}"
+		log_info "launchd: ${label}"
+		;;
+	esac
 	return 0
 }
 
@@ -341,13 +773,25 @@ serviceman_labels_for_dir() {
 		if [[ -f "${manifest}" ]]; then
 			jq -r '.services[].label // empty' "${manifest}" 2>/dev/null || true
 		fi
-		local agents prefix plist
-		agents=$(serviceman_launchagents_dir)
-		prefix="${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.${hash}."
-		for plist in "${agents}/${prefix}"*.plist; do
-			[[ -f "${plist}" ]] || continue
-			basename "${plist}" .plist
-		done
+		local prefix="${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.${hash}."
+		case "$(serviceman_backend)" in
+		systemd)
+			local units unit
+			units=$(serviceman_systemd_user_dir)
+			for unit in "${units}/${prefix}"*.service; do
+				[[ -f "${unit}" ]] || continue
+				basename "${unit}" .service
+			done
+			;;
+		*)
+			local agents plist
+			agents=$(serviceman_launchagents_dir)
+			for plist in "${agents}/${prefix}"*.plist; do
+				[[ -f "${plist}" ]] || continue
+				basename "${plist}" .plist
+			done
+			;;
+		esac
 	} | awk 'NF && !seen[$0]++'
 }
 
@@ -355,46 +799,88 @@ serviceman_stop_all() {
 	[[ "$DEBUG_MODE" == "true" ]] && echo "[DEBUG] Function: serviceman_stop_all" >&2
 
 	local beranodes_dir="$1"
-	if [[ "${IS_MACOS}" != "true" ]] || ! command -v launchctl >/dev/null 2>&1; then
+	local labels label count=0
+
+	case "$(serviceman_backend)" in
+	systemd)
+		if [[ "${IS_LINUX}" != "true" ]] || ! command -v systemctl >/dev/null 2>&1; then
+			return 0
+		fi
+		labels=$(serviceman_labels_for_dir "${beranodes_dir}" || true)
+		if [[ -z "${labels}" ]]; then
+			log_info "No systemd user units found for ${beranodes_dir}"
+			return 0
+		fi
+		while IFS= read -r label; do
+			[[ -z "${label}" ]] && continue
+			log_info "Stopping systemd unit ${label}.service"
+			serviceman_systemd_stop_unit "${label}"
+			count=$((count + 1))
+		done <<<"${labels}"
+		serviceman_systemd_prepare_env
+		systemctl --user daemon-reload >/dev/null 2>&1 || true
+		log_success "Stopped ${count} systemd unit(s)"
+		;;
+	launchd)
+		if [[ "${IS_MACOS}" != "true" ]] || ! command -v launchctl >/dev/null 2>&1; then
+			return 0
+		fi
+		local domain user_plist
+		domain=$(serviceman_launchd_domain)
+		labels=$(serviceman_labels_for_dir "${beranodes_dir}" || true)
+		if [[ -z "${labels}" ]]; then
+			log_info "No launchd services found for ${beranodes_dir}"
+			return 0
+		fi
+		while IFS= read -r label; do
+			[[ -z "${label}" ]] && continue
+			log_info "Stopping launchd job ${label}"
+			serviceman_bootout "${domain}" "${label}"
+			user_plist=$(serviceman_user_plist_path "${label}")
+			rm -f "${user_plist}"
+			count=$((count + 1))
+		done <<<"${labels}"
+		log_success "Stopped ${count} launchd job(s)"
+		;;
+	*)
 		return 0
-	fi
-
-	local domain label user_plist count=0
-	domain=$(serviceman_launchd_domain)
-
-	local labels
-	labels=$(serviceman_labels_for_dir "${beranodes_dir}" || true)
-	if [[ -z "${labels}" ]]; then
-		log_info "No launchd services found for ${beranodes_dir}"
-		return 0
-	fi
-
-	while IFS= read -r label; do
-		[[ -z "${label}" ]] && continue
-		log_info "Stopping launchd job ${label}"
-		serviceman_bootout "${domain}" "${label}"
-		user_plist=$(serviceman_user_plist_path "${label}")
-		rm -f "${user_plist}"
-		count=$((count + 1))
-	done <<<"${labels}"
-
-	log_success "Stopped ${count} launchd job(s)"
+		;;
+	esac
 	return 0
 }
 
 serviceman_any_running() {
 	local beranodes_dir="$1"
-	if [[ "${IS_MACOS}" != "true" ]] || ! command -v launchctl >/dev/null 2>&1; then
+	local label state labels
+
+	case "$(serviceman_backend)" in
+	systemd)
+		if [[ "${IS_LINUX}" != "true" ]] || ! command -v systemctl >/dev/null 2>&1; then
+			return 1
+		fi
+		;;
+	launchd)
+		if [[ "${IS_MACOS}" != "true" ]] || ! command -v launchctl >/dev/null 2>&1; then
+			return 1
+		fi
+		;;
+	*)
 		return 1
-	fi
-	local domain label state
-	domain=$(serviceman_launchd_domain)
-	local labels
+		;;
+	esac
+
 	labels=$(serviceman_labels_for_dir "${beranodes_dir}" || true)
 	[[ -z "${labels}" ]] && return 1
 	while IFS= read -r label; do
 		[[ -z "${label}" ]] && continue
-		state=$(serviceman_service_state "${domain}" "${label}")
+		case "$(serviceman_backend)" in
+		systemd)
+			state=$(serviceman_systemd_service_state "${label}")
+			;;
+		*)
+			state=$(serviceman_launchd_service_state "$(serviceman_launchd_domain)" "${label}")
+			;;
+		esac
 		if [[ "${state}" == "running" ]]; then
 			return 0
 		fi
@@ -404,10 +890,39 @@ serviceman_any_running() {
 
 serviceman_prepare_start() {
 	local beranodes_dir="$1"
-	serviceman_require_launchd || return 1
+	serviceman_require || return 1
+	local abs domain
+	abs=$(serviceman_abspath "${beranodes_dir}")
+	case "$(serviceman_backend)" in
+	systemd)
+		log_info "Stopping any existing systemd user units for this node set..."
+		serviceman_stop_all "${abs}" || true
+		serviceman_systemd_ensure_linger
+		serviceman_write_fresh_manifest "${abs}" "user"
+		serviceman_write_systemd_runner "$(serviceman_systemd_runner_path "${abs}")"
+		;;
+	*)
+		log_info "Unloading any existing launchd jobs for this node set..."
+		serviceman_stop_all "${abs}" || true
+		domain=$(serviceman_launchd_domain)
+		serviceman_write_fresh_manifest "${abs}" "${domain}"
+		;;
+	esac
+}
+
+serviceman_log_started_hint() {
+	local beranodes_dir="$1"
 	local abs
 	abs=$(serviceman_abspath "${beranodes_dir}")
-	log_info "Unloading any existing launchd jobs for this node set..."
-	serviceman_stop_all "${abs}" || true
-	serviceman_write_fresh_manifest "${abs}" "$(serviceman_launchd_domain)"
+	log_info "Logs: ${abs}${BERANODES_PATH_LOGS}/"
+	case "$(serviceman_backend)" in
+	systemd)
+		log_info "journald: journalctl --user -u ${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.*.service -f"
+		log_info "Units: $(serviceman_systemd_user_dir)/${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.*.service"
+		;;
+	*)
+		log_info "Plists: ${HOME}/Library/LaunchAgents/${SERVICEMAN_LAUNCHD_LABEL_PREFIX}.*.plist"
+		;;
+	esac
+	log_info "Stop with: beranode stop"
 }

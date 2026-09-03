@@ -25,6 +25,10 @@
 #   Test 20: --json is incompatible with --watch
 #   Test 21: --help mentions --json and Storage
 #   Test 22: status_comma / status_percent / status_diskutil_field helpers
+#   Test 23: Memory footer (per-binary RSS / total RAM)
+#   Test 24: Memory footer shows RSS for a live PID file
+#   Test 25: memory helper unit tests (parse size, format gb, total RAM, RSS)
+#   Test 26: SNAPSHOT column (pruned / archive, including --json)
 #
 # Usage: ./tests/test_status.sh
 # =============================================================================
@@ -151,11 +155,13 @@ NODEEOF
     "moniker": "test-node",
     "network": "devnet",
     "validators": ${validators},
+    "rpcs": ${full_nodes},
     "full_nodes": ${full_nodes},
     "pruned_nodes": 0,
     "total_nodes": ${total},
     "beranode_dir": "${output_dir}",
     "mode": "${mode}",
+    "snapshot_type": "pruned",
     "wallet_address": "0x0000000000000000000000000000000000000001",
     "nodes": ${nodes_json}
 }
@@ -430,6 +436,12 @@ else
     fail_test "--help missing Storage"
 fi
 
+if echo "$output" | grep -qi "memory"; then
+    pass_test "--help mentions Memory"
+else
+    fail_test "--help missing Memory"
+fi
+
 # ─── Test 6: Missing config file ────────────────────────────────────────────
 log_header "Test 6: Missing config file error handling"
 
@@ -560,9 +572,10 @@ log_info "Config created at ${TEST9_DIR}/beranodes.config.json"
 output=$(cd "${PROJECT_DIR}" && ./beranode status --verbose --beranodes-dir "${TEST9_DIR}" 2>&1) || true
 echo "$output"
 
-# Should have 4 service rows: 2 nodes x 2 services
-bera_reth_count=$(echo "$output" | grep -c "bera-reth" || true)
-beacond_count=$(echo "$output" | grep -c "beacond" || true)
+# Should have 4 service rows: 2 nodes x 2 services (ignore Memory footer names)
+table_out=$(echo "$output" | awk '/^  Storage:/{exit} {print}')
+bera_reth_count=$(echo "$table_out" | grep -c "bera-reth" || true)
+beacond_count=$(echo "$table_out" | grep -c "beacond" || true)
 
 if [[ $bera_reth_count -eq 2 ]]; then
     pass_test "Shows 2 bera-reth rows (one per node)"
@@ -671,17 +684,17 @@ log_header "Test 13: EL block shown as decimal"
 
 output=$(cd "${PROJECT_DIR}" && ./beranode status 2>&1) || true
 
-# In compact mode the EL BLOCK column should be a plain decimal (no 0x prefix)
-el_block_val=$(echo "$output" | grep "val-0" | awk '{print $4}')
+# Compact columns: NODE ROLE SNAPSHOT EL_STATUS EL_BLOCK ...
+el_block_val=$(echo "$output" | grep "val-0" | awk '{print $5}')
 if [[ "${el_block_val}" =~ ^[0-9]+$ ]]; then
     pass_test "EL block is decimal: ${el_block_val}"
 else
     fail_test "EL block is not decimal: '${el_block_val}'"
 fi
 
-# Also check verbose mode
+# Also check verbose mode (NODE ROLE SNAPSHOT SERVICE STATUS BLOCK)
 output=$(cd "${PROJECT_DIR}" && ./beranode status -v 2>&1) || true
-el_block_val=$(echo "$output" | grep "bera-reth" | head -1 | awk '{print $5}')
+el_block_val=$(echo "$output" | grep "bera-reth" | head -1 | awk '{print $6}')
 if [[ "${el_block_val}" =~ ^[0-9]+$ ]]; then
     pass_test "Verbose EL block is decimal: ${el_block_val}"
 else
@@ -922,6 +935,12 @@ else
     fail_test "--json node moniker mismatch"
 fi
 
+if echo "$json_output" | jq -e '.nodes[0].snapshot_type == "pruned"' >/dev/null 2>&1; then
+    pass_test "--json snapshot_type is pruned"
+else
+    fail_test "--json snapshot_type mismatch"
+fi
+
 if echo "$json_output" | jq -e '.nodes[0].el.status == "offline"' >/dev/null 2>&1; then
     pass_test "--json EL status is offline for synthetic config"
 else
@@ -956,6 +975,30 @@ if echo "$json_output" | jq -e '.storage.path | endswith("/nodes")' >/dev/null 2
     pass_test "--json storage.path ends with /nodes"
 else
     fail_test "--json storage.path should end with /nodes"
+fi
+
+if echo "$json_output" | jq -e '.memory.total_bytes > 0' >/dev/null 2>&1; then
+    pass_test "--json memory.total_bytes > 0"
+else
+    fail_test "--json memory.total_bytes missing or zero"
+fi
+
+if echo "$json_output" | jq -e '.memory.processes | length == 2' >/dev/null 2>&1; then
+    pass_test "--json memory.processes has two binaries"
+else
+    fail_test "--json memory.processes count mismatch"
+fi
+
+if echo "$json_output" | jq -e '.memory.processes[0].name == "val-0-bera-reth"' >/dev/null 2>&1; then
+    pass_test "--json memory process name is val-0-bera-reth"
+else
+    fail_test "--json memory process name mismatch"
+fi
+
+if echo "$json_output" | jq -e '.memory.processes[0].rss_bytes == null' >/dev/null 2>&1; then
+    pass_test "--json memory rss_bytes is null when process is not running"
+else
+    fail_test "--json memory rss_bytes should be null for synthetic offline node"
 fi
 
 # Table chrome must not leak into JSON mode
@@ -1031,6 +1074,222 @@ if echo "$helper_out" | grep -q "free:6028290715648"; then
 else
     fail_test "status_diskutil_field free failed: $(echo "$helper_out" | grep free)"
 fi
+
+# ─── Test 23: Memory footer ─────────────────────────────────────────────────
+log_header "Test 23: Memory footer"
+
+TEST23_DIR=$(mktemp -d)
+create_test_config "${TEST23_DIR}" "local" 1 0
+mkdir -p "${TEST23_DIR}/nodes"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST23_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep -q "Memory:"; then
+    pass_test "Memory section present"
+else
+    fail_test "Memory section missing"
+fi
+
+if echo "$output" | grep -q "val-0-bera-reth"; then
+    pass_test "Memory lists val-0-bera-reth"
+else
+    fail_test "Memory missing val-0-bera-reth"
+fi
+
+if echo "$output" | grep -q "val-0-beacond"; then
+    pass_test "Memory lists val-0-beacond"
+else
+    fail_test "Memory missing val-0-beacond"
+fi
+
+if echo "$output" | grep "val-0-bera-reth" | grep -q ": --"; then
+    pass_test "Offline binary shows --"
+else
+    fail_test "Offline binary should show --: $(echo "$output" | grep "val-0-bera-reth")"
+fi
+
+rm -rf "${TEST23_DIR}"
+
+# ─── Test 24: Memory footer with a live PID ─────────────────────────────────
+log_header "Test 24: Memory footer shows RSS for a live PID file"
+
+TEST24_DIR=$(mktemp -d)
+create_test_config "${TEST24_DIR}" "local" 1 0
+mkdir -p "${TEST24_DIR}/nodes" "${TEST24_DIR}/runs"
+sleep 120 &
+TEST24_PID=$!
+echo "${TEST24_PID}" > "${TEST24_DIR}/runs/test-node-0-val-bera-reth.pid"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST24_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep "val-0-bera-reth" | grep -qE "[0-9]+\.[0-9]gb/[0-9]+gb \([0-9]+\.[0-9]{2}%\)"; then
+    pass_test "Live PID shows used/total RAM and percent"
+else
+    fail_test "Live PID missing used/total format: $(echo "$output" | grep "val-0-bera-reth")"
+fi
+
+if echo "$output" | grep "val-0-beacond" | grep -q ": --"; then
+    pass_test "Missing beacond PID still shows --"
+else
+    fail_test "Missing beacond PID should show --"
+fi
+
+kill "${TEST24_PID}" 2>/dev/null || true
+wait "${TEST24_PID}" 2>/dev/null || true
+rm -rf "${TEST24_DIR}"
+
+# ─── Test 25: memory helper unit tests ──────────────────────────────────────
+log_header "Test 25: memory helpers (parse size, format, total RAM, RSS)"
+
+helper_out=$(
+    eval "$(sed -n '/^status_role_short()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_binary_label()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_query_total_ram_bytes()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_parse_mem_size()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_parse_docker_mem_used()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_format_mem_used()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_format_mem_total()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    eval "$(sed -n '/^status_pid_rss_bytes()/,/^}/p' "${PROJECT_DIR}/src/commands/status.sh")"
+    echo "role:$(status_role_short validator)"
+    echo "label:$(status_binary_label 0 validator bera-reth)"
+    echo "gib:$(status_parse_mem_size 4.40GiB)"
+    echo "mib:$(status_parse_mem_size 500MiB)"
+    echo "docker:$(status_parse_docker_mem_used '4.40GiB / 7.654GiB')"
+    echo "used:$(status_format_mem_used 4724464026)"
+    echo "total:$(status_format_mem_total 68719476736)"
+    echo "ram:$(status_query_total_ram_bytes)"
+    echo "rss:$(status_pid_rss_bytes $$)"
+    echo "dead:$(status_pid_rss_bytes 99999999 || true)"
+)
+
+if echo "$helper_out" | grep -q "role:val"; then
+    pass_test "status_role_short validator → val"
+else
+    fail_test "status_role_short failed: $(echo "$helper_out" | grep role)"
+fi
+
+if echo "$helper_out" | grep -q "label:val-0-bera-reth"; then
+    pass_test "status_binary_label → val-0-bera-reth"
+else
+    fail_test "status_binary_label failed: $(echo "$helper_out" | grep label)"
+fi
+
+# 4.40 * 1073741824 = 4724464025.6 → 4724464026
+if echo "$helper_out" | grep -qE "gib:472446402[0-9]"; then
+    pass_test "status_parse_mem_size 4.40GiB"
+else
+    fail_test "status_parse_mem_size GiB failed: $(echo "$helper_out" | grep gib)"
+fi
+
+if echo "$helper_out" | grep -q "mib:524288000"; then
+    pass_test "status_parse_mem_size 500MiB"
+else
+    fail_test "status_parse_mem_size MiB failed: $(echo "$helper_out" | grep mib)"
+fi
+
+if echo "$helper_out" | grep -qE "docker:472446402[0-9]"; then
+    pass_test "status_parse_docker_mem_used takes the used side"
+else
+    fail_test "status_parse_docker_mem_used failed: $(echo "$helper_out" | grep docker)"
+fi
+
+if echo "$helper_out" | grep -q "used:4.4gb"; then
+    pass_test "status_format_mem_used 4.40GiB → 4.4gb"
+else
+    fail_test "status_format_mem_used failed: $(echo "$helper_out" | grep used)"
+fi
+
+if echo "$helper_out" | grep -q "total:64gb"; then
+    pass_test "status_format_mem_total 64GiB → 64gb"
+else
+    fail_test "status_format_mem_total failed: $(echo "$helper_out" | grep total)"
+fi
+
+ram_bytes=$(echo "$helper_out" | awk -F: '/^ram:/ {print $2}')
+if [[ "${ram_bytes}" =~ ^[0-9]+$ && "${ram_bytes}" -gt 0 ]]; then
+    pass_test "status_query_total_ram_bytes returns host RAM"
+else
+    fail_test "status_query_total_ram_bytes failed: $(echo "$helper_out" | grep ram)"
+fi
+
+rss_bytes=$(echo "$helper_out" | awk -F: '/^rss:/ {print $2}')
+if [[ "${rss_bytes}" =~ ^[0-9]+$ && "${rss_bytes}" -gt 0 ]]; then
+    pass_test "status_pid_rss_bytes reads current shell RSS"
+else
+    fail_test "status_pid_rss_bytes failed: $(echo "$helper_out" | grep rss)"
+fi
+
+if echo "$helper_out" | grep -q "dead:0"; then
+    pass_test "status_pid_rss_bytes missing PID is 0"
+else
+    fail_test "status_pid_rss_bytes dead PID failed: $(echo "$helper_out" | grep dead)"
+fi
+
+# ─── Test 26: SNAPSHOT column (pruned / archive) ────────────────────────────
+log_header "Test 26: SNAPSHOT column"
+
+TEST26_DIR=$(mktemp -d)
+create_test_config "${TEST26_DIR}" "local" 1 0
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST26_DIR}" 2>&1) || true
+echo "$output"
+
+if echo "$output" | grep -q "SNAPSHOT"; then
+    pass_test "Compact header has SNAPSHOT column"
+else
+    fail_test "Compact header missing SNAPSHOT column"
+fi
+
+if echo "$output" | grep -q "ROLE.*SNAPSHOT.*EL STATUS"; then
+    pass_test "Column order is ROLE | SNAPSHOT | EL STATUS"
+else
+    fail_test "Column order is not ROLE | SNAPSHOT | EL STATUS"
+fi
+
+if echo "$output" | grep "test-node-val-0" | grep -q "pruned"; then
+    pass_test "Default snapshot_type shows pruned"
+else
+    fail_test "Default snapshot_type should show pruned"
+fi
+
+jq '.snapshot_type = "archive"' "${TEST26_DIR}/beranodes.config.json" > "${TEST26_DIR}/beranodes.config.json.tmp"
+mv "${TEST26_DIR}/beranodes.config.json.tmp" "${TEST26_DIR}/beranodes.config.json"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST26_DIR}" 2>&1) || true
+if echo "$output" | grep "test-node-val-0" | grep -q "archive"; then
+    pass_test "snapshot_type=archive shows archive"
+else
+    fail_test "snapshot_type=archive should show archive"
+fi
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --verbose --beranodes-dir "${TEST26_DIR}" 2>&1) || true
+if echo "$output" | grep "bera-reth" | head -1 | grep -q "archive"; then
+    pass_test "Verbose bera-reth row shows archive"
+else
+    fail_test "Verbose bera-reth row missing archive"
+fi
+
+json_output=$(cd "${PROJECT_DIR}" && ./beranode status --json --beranodes-dir "${TEST26_DIR}" 2>&1) || true
+if echo "$json_output" | jq -e '.nodes[0].snapshot_type == "archive"' >/dev/null 2>&1; then
+    pass_test "--json snapshot_type is archive when configured"
+else
+    fail_test "--json snapshot_type should be archive"
+fi
+
+# Older configs without snapshot_type: rpc-full still maps to archive
+jq 'del(.snapshot_type) | .nodes[0].role = "rpc-full"' "${TEST26_DIR}/beranodes.config.json" > "${TEST26_DIR}/beranodes.config.json.tmp"
+mv "${TEST26_DIR}/beranodes.config.json.tmp" "${TEST26_DIR}/beranodes.config.json"
+
+output=$(cd "${PROJECT_DIR}" && ./beranode status --beranodes-dir "${TEST26_DIR}" 2>&1) || true
+if echo "$output" | grep "test-node-val-0" | grep -q "archive"; then
+    pass_test "Legacy rpc-full role without override shows archive"
+else
+    fail_test "Legacy rpc-full role should map to archive"
+fi
+
+rm -rf "${TEST26_DIR}"
 
 # =============================================================================
 # Summary
